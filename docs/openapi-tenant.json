@@ -1,0 +1,591 @@
+{
+    "openapi": "3.1.0",
+    "info": {
+        "title": "Tenant API",
+        "version": "1.0.0",
+        "description": "# Tenant API\n\nREST API for a **tenant** application (served on the tenant domain).\n\n## Base URL\n\nEndpoints are relative to `/api/v1` on the tenant hostname\n(for example `https://acme.localhost/api/v1`).\n\n## Authentication\n\n- Use **Laravel Sanctum** bearer tokens (`Authorization: Bearer {token}`).\n- Owners set a password via `POST /auth/setup-password`, then `POST /auth/login`.\n- Impersonation redeem: `POST /auth/impersonate`.\n\n## Response envelope\n\nSame JSON envelope as the Central API: `{ status, message, data, meta, errors }`."
+    },
+    "servers": [
+        {
+            "url": "http://multi-tenant-api.test/api/v1"
+        }
+    ],
+    "tags": [
+        {
+            "name": "Tenant Auth",
+            "description": "Tenant-domain owner authentication."
+        }
+    ],
+    "security": [
+        {
+            "http": []
+        }
+    ],
+    "paths": {
+        "/auth/setup-password": {
+            "post": {
+                "operationId": "tenant.auth.setupPassword",
+                "description": "Accept an invite token and set the owner password.",
+                "summary": "Setup owner password",
+                "tags": [
+                    "Tenant Auth"
+                ],
+                "requestBody": {
+                    "required": true,
+                    "content": {
+                        "application/json": {
+                            "schema": {
+                                "$ref": "#/components/schemas/SetupPasswordRequest"
+                            }
+                        }
+                    }
+                },
+                "responses": {
+                    "201": {
+                        "description": "",
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "type": "object",
+                                    "properties": {
+                                        "status": {
+                                            "type": "boolean"
+                                        },
+                                        "message": {
+                                            "type": "string",
+                                            "const": "Password set successfully."
+                                        },
+                                        "data": {
+                                            "type": "object",
+                                            "properties": {
+                                                "token": {
+                                                    "type": "string"
+                                                },
+                                                "token_type": {
+                                                    "type": "string",
+                                                    "const": "Bearer"
+                                                },
+                                                "user": {
+                                                    "$ref": "#/components/schemas/TenantUserResource"
+                                                }
+                                            },
+                                            "required": [
+                                                "token",
+                                                "token_type",
+                                                "user"
+                                            ]
+                                        },
+                                        "meta": {
+                                            "type": "object"
+                                        },
+                                        "errors": {
+                                            "type": "null"
+                                        }
+                                    },
+                                    "required": [
+                                        "status",
+                                        "message",
+                                        "data",
+                                        "meta",
+                                        "errors"
+                                    ]
+                                }
+                            }
+                        }
+                    },
+                    "422": {
+                        "$ref": "#/components/responses/ValidationException"
+                    }
+                },
+                "security": []
+            }
+        },
+        "/auth/login": {
+            "post": {
+                "operationId": "tenant.auth.login",
+                "description": "Authenticate a tenant user with email and password.",
+                "summary": "Tenant login",
+                "tags": [
+                    "Tenant Auth"
+                ],
+                "requestBody": {
+                    "required": true,
+                    "content": {
+                        "application/json": {
+                            "schema": {
+                                "$ref": "#/components/schemas/TenantLoginRequest"
+                            }
+                        }
+                    }
+                },
+                "responses": {
+                    "200": {
+                        "description": "",
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "type": "object",
+                                    "properties": {
+                                        "status": {
+                                            "type": "boolean"
+                                        },
+                                        "message": {
+                                            "type": "string",
+                                            "const": "Logged in successfully."
+                                        },
+                                        "data": {
+                                            "type": "object",
+                                            "properties": {
+                                                "token": {
+                                                    "type": "string"
+                                                },
+                                                "token_type": {
+                                                    "type": "string",
+                                                    "const": "Bearer"
+                                                },
+                                                "user": {
+                                                    "$ref": "#/components/schemas/TenantUserResource"
+                                                }
+                                            },
+                                            "required": [
+                                                "token",
+                                                "token_type",
+                                                "user"
+                                            ]
+                                        },
+                                        "meta": {
+                                            "type": "object"
+                                        },
+                                        "errors": {
+                                            "type": "null"
+                                        }
+                                    },
+                                    "required": [
+                                        "status",
+                                        "message",
+                                        "data",
+                                        "meta",
+                                        "errors"
+                                    ]
+                                }
+                            }
+                        }
+                    },
+                    "422": {
+                        "$ref": "#/components/responses/ValidationException"
+                    }
+                },
+                "security": []
+            }
+        },
+        "/auth/impersonate": {
+            "post": {
+                "operationId": "tenant.auth.impersonate",
+                "description": "Exchange a Central impersonation token for a tenant Sanctum token.",
+                "summary": "Redeem impersonation",
+                "tags": [
+                    "Tenant Auth"
+                ],
+                "requestBody": {
+                    "required": true,
+                    "content": {
+                        "application/json": {
+                            "schema": {
+                                "$ref": "#/components/schemas/RedeemImpersonationRequest"
+                            }
+                        }
+                    }
+                },
+                "responses": {
+                    "200": {
+                        "description": "",
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "type": "object",
+                                    "properties": {
+                                        "status": {
+                                            "type": "boolean"
+                                        },
+                                        "message": {
+                                            "type": "string",
+                                            "const": "Impersonation session started."
+                                        },
+                                        "data": {
+                                            "type": "object",
+                                            "properties": {
+                                                "token": {
+                                                    "type": "string"
+                                                },
+                                                "token_type": {
+                                                    "type": "string",
+                                                    "const": "Bearer"
+                                                },
+                                                "user": {
+                                                    "$ref": "#/components/schemas/TenantUserResource"
+                                                },
+                                                "impersonating": {
+                                                    "type": "boolean"
+                                                }
+                                            },
+                                            "required": [
+                                                "token",
+                                                "token_type",
+                                                "user",
+                                                "impersonating"
+                                            ]
+                                        },
+                                        "meta": {
+                                            "type": "object"
+                                        },
+                                        "errors": {
+                                            "type": "null"
+                                        }
+                                    },
+                                    "required": [
+                                        "status",
+                                        "message",
+                                        "data",
+                                        "meta",
+                                        "errors"
+                                    ]
+                                }
+                            }
+                        }
+                    },
+                    "422": {
+                        "$ref": "#/components/responses/ValidationException"
+                    }
+                },
+                "security": []
+            }
+        },
+        "/auth/me": {
+            "get": {
+                "operationId": "tenant.auth.me",
+                "description": "Return the authenticated tenant user.",
+                "summary": "Current tenant user",
+                "tags": [
+                    "Tenant Auth"
+                ],
+                "responses": {
+                    "200": {
+                        "description": "",
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "type": "object",
+                                    "properties": {
+                                        "status": {
+                                            "type": "boolean"
+                                        },
+                                        "message": {
+                                            "type": "string",
+                                            "const": "Profile retrieved successfully."
+                                        },
+                                        "data": {
+                                            "$ref": "#/components/schemas/TenantUserResource"
+                                        },
+                                        "meta": {
+                                            "type": "object"
+                                        },
+                                        "errors": {
+                                            "type": "null"
+                                        }
+                                    },
+                                    "required": [
+                                        "status",
+                                        "message",
+                                        "data",
+                                        "meta",
+                                        "errors"
+                                    ]
+                                }
+                            }
+                        }
+                    },
+                    "401": {
+                        "$ref": "#/components/responses/AuthenticationException"
+                    }
+                }
+            }
+        },
+        "/auth/logout": {
+            "post": {
+                "operationId": "tenant.auth.logout",
+                "description": "Revoke the current tenant Sanctum token.",
+                "summary": "Tenant logout",
+                "tags": [
+                    "Tenant Auth"
+                ],
+                "responses": {
+                    "200": {
+                        "description": "",
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "type": "object",
+                                    "properties": {
+                                        "status": {
+                                            "type": "boolean"
+                                        },
+                                        "message": {
+                                            "type": "string",
+                                            "const": "Logged out successfully."
+                                        },
+                                        "data": {
+                                            "type": "object"
+                                        },
+                                        "meta": {
+                                            "type": "object"
+                                        },
+                                        "errors": {
+                                            "type": "null"
+                                        }
+                                    },
+                                    "required": [
+                                        "status",
+                                        "message",
+                                        "data",
+                                        "meta",
+                                        "errors"
+                                    ]
+                                }
+                            }
+                        }
+                    },
+                    "401": {
+                        "$ref": "#/components/responses/AuthenticationException"
+                    }
+                }
+            }
+        }
+    },
+    "components": {
+        "securitySchemes": {
+            "http": {
+                "type": "http",
+                "scheme": "bearer"
+            }
+        },
+        "schemas": {
+            "RedeemImpersonationRequest": {
+                "type": "object",
+                "description": "Validates redemption of a central impersonation token on a tenant.",
+                "properties": {
+                    "token": {
+                        "type": "string",
+                        "description": "One-time impersonation token issued by the central application.",
+                        "examples": [
+                            "eyJ0eXAiOiJKV1QiLCJhbGciOiJIUzI1NiJ9..."
+                        ]
+                    }
+                },
+                "required": [
+                    "token"
+                ],
+                "title": "RedeemImpersonationRequest"
+            },
+            "SetupPasswordRequest": {
+                "type": "object",
+                "description": "Validates initial password setup for a tenant user via invitation token.",
+                "properties": {
+                    "token": {
+                        "type": "string",
+                        "description": "Invitation or setup token from the onboarding email.",
+                        "examples": [
+                            "4a5b6c7d8e9f0a1b2c3d4e5f6a7b8c9d"
+                        ]
+                    },
+                    "password": {
+                        "type": "string",
+                        "description": "New account password and confirmation.",
+                        "examples": [
+                            "TenantPass789!"
+                        ]
+                    },
+                    "password_confirmation": {
+                        "type": "string"
+                    }
+                },
+                "required": [
+                    "token",
+                    "password",
+                    "password_confirmation"
+                ],
+                "title": "SetupPasswordRequest"
+            },
+            "TenantLoginRequest": {
+                "type": "object",
+                "description": "Validates tenant user login credentials.",
+                "properties": {
+                    "email": {
+                        "type": "string",
+                        "description": "Tenant user login email address.",
+                        "examples": [
+                            "user@tenant.example.com"
+                        ]
+                    },
+                    "password": {
+                        "type": "string",
+                        "description": "Account password.",
+                        "examples": [
+                            "SecurePass123!"
+                        ]
+                    }
+                },
+                "required": [
+                    "email",
+                    "password"
+                ],
+                "title": "TenantLoginRequest"
+            },
+            "TenantUserResource": {
+                "type": "object",
+                "properties": {
+                    "id": {
+                        "type": "integer",
+                        "description": "Tenant user primary key.",
+                        "examples": [
+                            1
+                        ]
+                    },
+                    "name": {
+                        "type": "string",
+                        "description": "Full display name.",
+                        "examples": [
+                            "John Doe"
+                        ]
+                    },
+                    "email": {
+                        "type": "string",
+                        "description": "Login email address.",
+                        "examples": [
+                            "user@tenant.test"
+                        ]
+                    },
+                    "is_owner": {
+                        "type": "boolean",
+                        "description": "Whether this user is the tenant owner."
+                    },
+                    "status": {
+                        "type": [
+                            "string",
+                            "null"
+                        ],
+                        "description": "Account status value.",
+                        "examples": [
+                            "active"
+                        ]
+                    },
+                    "status_label": {
+                        "type": [
+                            "string",
+                            "null"
+                        ],
+                        "description": "Human-readable account status label."
+                    },
+                    "email_verified_at": {
+                        "type": [
+                            "string",
+                            "null"
+                        ],
+                        "format": "date-time",
+                        "description": "Email verification timestamp."
+                    },
+                    "last_login_at": {
+                        "type": [
+                            "string",
+                            "null"
+                        ],
+                        "format": "date-time",
+                        "description": "Most recent login timestamp."
+                    },
+                    "created_at": {
+                        "type": [
+                            "string",
+                            "null"
+                        ],
+                        "format": "date-time",
+                        "description": "Creation timestamp (ISO-8601).",
+                        "examples": [
+                            "2026-07-13T11:22:26.000000Z"
+                        ]
+                    },
+                    "updated_at": {
+                        "type": [
+                            "string",
+                            "null"
+                        ],
+                        "format": "date-time",
+                        "description": "Last update timestamp (ISO-8601)."
+                    }
+                },
+                "required": [
+                    "id",
+                    "name",
+                    "email",
+                    "is_owner",
+                    "status",
+                    "status_label",
+                    "email_verified_at",
+                    "last_login_at",
+                    "created_at",
+                    "updated_at"
+                ],
+                "title": "TenantUserResource"
+            }
+        },
+        "responses": {
+            "ValidationException": {
+                "description": "Validation error",
+                "content": {
+                    "application/json": {
+                        "schema": {
+                            "type": "object",
+                            "properties": {
+                                "message": {
+                                    "type": "string",
+                                    "description": "Errors overview."
+                                },
+                                "errors": {
+                                    "type": "object",
+                                    "description": "A detailed description of each field that failed validation.",
+                                    "additionalProperties": {
+                                        "type": "array",
+                                        "items": {
+                                            "type": "string"
+                                        }
+                                    }
+                                }
+                            },
+                            "required": [
+                                "message",
+                                "errors"
+                            ]
+                        }
+                    }
+                }
+            },
+            "AuthenticationException": {
+                "description": "Unauthenticated",
+                "content": {
+                    "application/json": {
+                        "schema": {
+                            "type": "object",
+                            "properties": {
+                                "message": {
+                                    "type": "string",
+                                    "description": "Error overview."
+                                }
+                            },
+                            "required": [
+                                "message"
+                            ]
+                        }
+                    }
+                }
+            }
+        }
+    }
+}
