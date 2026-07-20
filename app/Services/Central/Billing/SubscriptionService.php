@@ -36,9 +36,9 @@ final class SubscriptionService
     }
 
     /**
-     * Paginate subscriptions with optional tenant, status, plan, gateway, and search filters.
+     * Paginate subscriptions with optional tenant, status, plan, gateway, date range, and search filters.
      *
-     * @param array{tenant_id?: string, status?: string, plan_id?: int, gateway?: string, search?: string, per_page?: int} $filters
+     * @param array{tenant_id?: string, status?: string, plan_id?: int, gateway?: string, search?: string, start_date?: string, end_date?: string, per_page?: int} $filters
      * @return LengthAwarePaginator<int, Subscription>
      */
     public function paginate(array $filters = []): LengthAwarePaginator
@@ -51,6 +51,12 @@ final class SubscriptionService
             ->when($filters['status'] ?? null, fn($q, $status) => $q->where('status', $status))
             ->when($filters['plan_id'] ?? null, fn($q, $planId) => $q->where('plan_id', $planId))
             ->when($filters['gateway'] ?? null, fn($q, $gateway) => $q->where('gateway', $gateway))
+            ->when($filters['start_date'] ?? null, function ($q, $date) {
+                $q->where('created_at', '>=', Carbon::parse($date)->startOfDay());
+            })
+            ->when($filters['end_date'] ?? null, function ($q, $date) {
+                $q->where('created_at', '<=', Carbon::parse($date)->endOfDay());
+            })
             ->when(
                 $filters['search'] ?? null,
                 fn($query, string $search) => $query->where(function ($q) use ($search): void {

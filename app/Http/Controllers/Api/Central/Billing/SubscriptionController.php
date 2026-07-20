@@ -32,7 +32,7 @@ final class SubscriptionController extends Controller
     {
         $this->authorize('viewAny', Subscription::class);
         $subscriptions = $this->subscriptionService->paginate($request->only([
-            'tenant_id', 'status', 'plan_id', 'gateway', 'search', 'per_page',
+            'tenant_id', 'status', 'plan_id', 'gateway', 'search', 'start_date', 'end_date', 'per_page',
         ]));
 
         return $this->paginated(SubscriptionResource::collection($subscriptions), 'Subscriptions retrieved successfully.');
