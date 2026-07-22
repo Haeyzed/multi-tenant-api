@@ -11,6 +11,7 @@ use App\Payments\PaymentMethodPayload;
 use App\Payments\PaymentResult;
 use App\Payments\SetupSessionResult;
 use App\Payments\Support\InteractsWithPaymentHttp;
+use Illuminate\Http\Client\ConnectionException;
 use Illuminate\Support\Str;
 use Throwable;
 
@@ -56,7 +57,8 @@ final class FlutterwaveDriver extends AbstractGatewayDriver
     /**
      * Refund via Flutterwave.
      *
-     * @param  array<string, mixed>  $options
+     * @param array<string, mixed> $options
+     * @throws ConnectionException
      */
     public function refund(Payment $payment, float $amount, array $options = []): PaymentResult
     {
@@ -133,7 +135,8 @@ final class FlutterwaveDriver extends AbstractGatewayDriver
     }
 
     /**
-     * @param  array<string, mixed>  $options
+     * @param array<string, mixed> $options
+     * @throws ConnectionException
      */
     public function createSetupSession(array $options): SetupSessionResult
     {
