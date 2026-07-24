@@ -11,6 +11,9 @@ use Illuminate\Foundation\Http\FormRequest;
  */
 class ScheduleNotificationRequest extends FormRequest
 {
+    /**
+     * Determine if the user is authorized to make this request.
+     */
     public function authorize(): bool
     {
         return $this->user()?->can('notifications.update') ?? false;
@@ -22,6 +25,13 @@ class ScheduleNotificationRequest extends FormRequest
     public function rules(): array
     {
         return [
+            /**
+             * When the notification should be sent.
+             *
+             * @var string
+             *
+             * @example 2026-08-01T14:30:00Z
+             */
             'scheduled_at' => ['required', 'date', 'after:now'],
         ];
     }

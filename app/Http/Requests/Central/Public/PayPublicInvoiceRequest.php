@@ -11,6 +11,9 @@ use Illuminate\Foundation\Http\FormRequest;
  */
 class PayPublicInvoiceRequest extends FormRequest
 {
+    /**
+     * Determine if the user is authorized to make this request.
+     */
     public function authorize(): bool
     {
         return true;
@@ -22,6 +25,13 @@ class PayPublicInvoiceRequest extends FormRequest
     public function rules(): array
     {
         return [
+            /**
+             * Payment gateway to charge the invoice with.
+             *
+             * @var string
+             *
+             * @example paystack
+             */
             'gateway' => ['required', 'string', 'max:50'],
         ];
     }

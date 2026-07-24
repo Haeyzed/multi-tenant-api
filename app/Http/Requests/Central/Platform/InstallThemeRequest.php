@@ -25,6 +25,13 @@ class InstallThemeRequest extends FormRequest
     public function rules(): array
     {
         return [
+            /**
+             * Tenant that should receive the theme installation.
+             *
+             * @var string|null
+             *
+             * @example 550e8400-e29b-41d4-a716-446655440000
+             */
             'tenant_id' => ['sometimes', 'nullable', 'string', 'exists:tenants,id'],
         ];
     }

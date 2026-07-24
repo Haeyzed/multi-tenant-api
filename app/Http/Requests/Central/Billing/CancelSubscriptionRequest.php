@@ -11,6 +11,9 @@ use Illuminate\Foundation\Http\FormRequest;
  */
 class CancelSubscriptionRequest extends FormRequest
 {
+    /**
+     * Determine if the user is authorized to make this request.
+     */
     public function authorize(): bool
     {
         $subscription = $this->route('subscription');
@@ -24,7 +27,22 @@ class CancelSubscriptionRequest extends FormRequest
     public function rules(): array
     {
         return [
+            /**
+             * Cancel immediately instead of at period end.
+             *
+             * @var bool
+             *
+             * @example false
+             */
             'immediately' => ['sometimes', 'boolean'],
+
+            /**
+             * Optional cancellation reason.
+             *
+             * @var string|null
+             *
+             * @example Switching to a different plan
+             */
             'reason' => ['sometimes', 'nullable', 'string', 'max:500'],
         ];
     }

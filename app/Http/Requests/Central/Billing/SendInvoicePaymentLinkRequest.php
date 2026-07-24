@@ -11,6 +11,9 @@ use Illuminate\Foundation\Http\FormRequest;
  */
 class SendInvoicePaymentLinkRequest extends FormRequest
 {
+    /**
+     * Determine if the user is authorized to make this request.
+     */
     public function authorize(): bool
     {
         return $this->user()?->can('billing.invoices.manage') ?? false;
@@ -22,6 +25,13 @@ class SendInvoicePaymentLinkRequest extends FormRequest
     public function rules(): array
     {
         return [
+            /**
+             * Optional recipient email override for the payment link.
+             *
+             * @var string|null
+             *
+             * @example billing@freshbasket.com
+             */
             'email' => ['sometimes', 'nullable', 'email', 'max:255'],
         ];
     }

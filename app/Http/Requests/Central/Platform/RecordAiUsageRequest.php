@@ -25,7 +25,22 @@ class RecordAiUsageRequest extends FormRequest
     public function rules(): array
     {
         return [
+            /**
+             * Number of tokens consumed by the request.
+             *
+             * @var int
+             *
+             * @example 1250
+             */
             'tokens' => ['required', 'integer', 'min:1'],
+
+            /**
+             * Optional credit cost deducted for this usage.
+             *
+             * @var float
+             *
+             * @example 0.05
+             */
             'credit_cost' => ['sometimes', 'numeric', 'min:0'],
         ];
     }

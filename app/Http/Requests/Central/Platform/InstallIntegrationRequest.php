@@ -25,7 +25,22 @@ class InstallIntegrationRequest extends FormRequest
     public function rules(): array
     {
         return [
+            /**
+             * Tenant to install for; omit for a central installation.
+             *
+             * @var string|null
+             *
+             * @example 550e8400-e29b-41d4-a716-446655440000
+             */
             'tenant_id' => ['sometimes', 'nullable', 'string', 'exists:tenants,id'],
+
+            /**
+             * Initial configuration values for the installation.
+             *
+             * @var array<string, mixed>
+             *
+             * @example {"api_key":"sk_test_xxx"}
+             */
             'configuration' => ['sometimes', 'array'],
         ];
     }

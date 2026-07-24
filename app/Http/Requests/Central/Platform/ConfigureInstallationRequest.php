@@ -25,6 +25,13 @@ class ConfigureInstallationRequest extends FormRequest
     public function rules(): array
     {
         return [
+            /**
+             * Integration installation configuration values.
+             *
+             * @var array<string, mixed>
+             *
+             * @example {"api_key":"sk_live_xxx","webhook_url":"https://hooks.example.test/stripe"}
+             */
             'configuration' => ['required', 'array'],
         ];
     }

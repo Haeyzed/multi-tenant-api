@@ -27,9 +27,40 @@ class StoreBackupRequest extends FormRequest
     public function rules(): array
     {
         return [
+            /**
+             * Human-readable backup label.
+             *
+             * @var string
+             *
+             * @example Pre-release snapshot
+             */
             'name' => ['sometimes', 'string', 'max:255'],
+
+            /**
+             * Backup content type.
+             *
+             * @var string
+             *
+             * @example full
+             */
             'type' => ['sometimes', Rule::enum(BackupType::class)],
+
+            /**
+             * Storage disk name to write the backup to.
+             *
+             * @var string
+             *
+             * @example s3
+             */
             'disk' => ['sometimes', 'string'],
+
+            /**
+             * Arbitrary backup metadata key-value pairs.
+             *
+             * @var array<string, mixed>
+             *
+             * @example {"triggered_by":"ops"}
+             */
             'metadata' => ['sometimes', 'array'],
         ];
     }

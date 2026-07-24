@@ -11,6 +11,9 @@ use Illuminate\Foundation\Http\FormRequest;
  */
 class MarkSubscriptionPastDueRequest extends FormRequest
 {
+    /**
+     * Determine if the user is authorized to make this request.
+     */
     public function authorize(): bool
     {
         $subscription = $this->route('subscription');
@@ -24,6 +27,13 @@ class MarkSubscriptionPastDueRequest extends FormRequest
     public function rules(): array
     {
         return [
+            /**
+             * Number of grace days before further enforcement.
+             *
+             * @var int
+             *
+             * @example 7
+             */
             'grace_days' => ['sometimes', 'integer', 'min:1', 'max:30'],
         ];
     }

@@ -1,5 +1,7 @@
 <?php
 
+use App\Http\Middleware\IncreaseDocsTimeLimit;
+use App\Scramble\Extensions\ApiResponseTypeInfer;
 use Dedoc\Scramble\Http\Middleware\RestrictedDocsAccess;
 use Dedoc\Scramble\SecurityDocumentation\MiddlewareAuthSecurityStrategy;
 
@@ -104,11 +106,12 @@ MD,
 
     'middleware' => [
         'web',
+        IncreaseDocsTimeLimit::class,
         RestrictedDocsAccess::class,
     ],
 
     'extensions' => [
-        App\Scramble\Extensions\ApiResponseTypeInfer::class,
+        ApiResponseTypeInfer::class,
     ],
 
     'security_strategy' => MiddlewareAuthSecurityStrategy::class,

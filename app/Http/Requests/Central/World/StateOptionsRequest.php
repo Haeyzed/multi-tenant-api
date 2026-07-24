@@ -11,6 +11,9 @@ use Illuminate\Foundation\Http\FormRequest;
  */
 class StateOptionsRequest extends FormRequest
 {
+    /**
+     * Determine if the user is authorized to make this request.
+     */
     public function authorize(): bool
     {
         return $this->user()?->can('world.view') ?? false;
@@ -22,7 +25,22 @@ class StateOptionsRequest extends FormRequest
     public function rules(): array
     {
         return [
+            /**
+             * Parent country identifier.
+             *
+             * @var int
+             *
+             * @example 1
+             */
             'country_id' => ['required', 'integer', 'exists:countries,id'],
+
+            /**
+             * Optional search term for filtering states by name or code.
+             *
+             * @var string|null
+             *
+             * @example Lagos
+             */
             'search' => ['sometimes', 'nullable', 'string', 'max:255'],
         ];
     }

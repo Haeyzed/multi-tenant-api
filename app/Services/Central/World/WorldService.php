@@ -11,6 +11,7 @@ use App\Models\World\Language;
 use App\Models\World\State;
 use App\Models\World\Timezone;
 use Illuminate\Contracts\Pagination\LengthAwarePaginator;
+use Illuminate\Database\Eloquent\Builder;
 use Illuminate\Database\Eloquent\Collection;
 use Illuminate\Support\Str;
 use Illuminate\Validation\ValidationException;
@@ -21,12 +22,14 @@ use Illuminate\Validation\ValidationException;
 final class WorldService
 {
     /**
-     * @param array{search?: string, status?: int|string|null, region?: string, per_page?: int} $filters
+     * Paginate countries for central admin listing.
+     *
+     * @param  array{search?: string, status?: int|string|null, region?: string, per_page?: int}  $filters
      * @return LengthAwarePaginator<int, Country>
      */
     public function paginateCountries(array $filters = []): LengthAwarePaginator
     {
-        $perPage = min((int)($filters['per_page'] ?? 15), 100);
+        $perPage = min((int) ($filters['per_page'] ?? 15), 100);
 
         return $this->countryQuery($filters, defaultActiveOnly: false)
             ->orderBy('name')
@@ -34,15 +37,18 @@ final class WorldService
     }
 
     /**
-     * @param array{search?: string, status?: int|string|null, region?: string} $filters
+     * Build a filtered country query, optionally defaulting to active rows only.
+     *
+     * @param  array{search?: string, status?: int|string|null, region?: string}  $filters
+     * @return Builder<Country>
      */
-    private function countryQuery(array $filters, bool $defaultActiveOnly = true)
+    private function countryQuery(array $filters, bool $defaultActiveOnly = true): Builder
     {
         return Country::query()
             ->with('currency')
             ->when(
                 $filters['search'] ?? null,
-                fn($query, string $search) => $query->where(function ($q) use ($search): void {
+                fn ($query, string $search) => $query->where(function ($q) use ($search): void {
                     $q->where('name', 'like', "%{$search}%")
                         ->orWhere('iso2', 'like', "%{$search}%")
                         ->orWhere('iso3', 'like', "%{$search}%")
@@ -52,15 +58,18 @@ final class WorldService
             )
             ->when(
                 $filters['region'] ?? null,
-                fn($query, string $region) => $query->where('region', $region)
+                fn ($query, string $region) => $query->where('region', $region)
             )
             ->when(
                 array_key_exists('status', $filters) && $filters['status'] !== null && $filters['status'] !== '',
-                fn($query) => $query->where('status', (int)$filters['status']),
-                fn($query) => $defaultActiveOnly ? $query->where('status', 1) : $query,
+                fn ($query) => $query->where('status', (int) $filters['status']),
+                fn ($query) => $defaultActiveOnly ? $query->where('status', 1) : $query,
             );
     }
 
+    /**
+     * Find a country by primary key with its currency relation.
+     */
     public function findCountry(int $id): Country
     {
         return Country::query()->with('currency')->findOrFail($id);
@@ -75,9 +84,12 @@ final class WorldService
 
         $code = $country?->currency?->code;
 
-        return filled($code) ? Str::upper((string)$code) : null;
+        return filled($code) ? Str::upper((string) $code) : null;
     }
 
+    /**
+     * Find a country by ISO 3166-1 alpha-2 code with its currency relation.
+     */
     public function findCountryByIso2(string $iso2): ?Country
     {
         return Country::query()
@@ -87,11 +99,13 @@ final class WorldService
     }
 
     /**
-     * @param array<string, mixed> $data
+     * Create a country after enforcing unique ISO2.
+     *
+     * @param  array<string, mixed>  $data
      */
     public function createCountry(array $data): Country
     {
-        $iso2 = Str::upper((string)$data['iso2']);
+        $iso2 = Str::upper((string) $data['iso2']);
 
         if (Country::query()->where('iso2', $iso2)->exists()) {
             throw ValidationException::withMessages([
@@ -101,29 +115,31 @@ final class WorldService
 
         $country = Country::query()->create([
             'iso2' => $iso2,
-            'iso3' => Str::upper((string)($data['iso3'] ?? '')),
+            'iso3' => Str::upper((string) ($data['iso3'] ?? '')),
             'name' => $data['name'],
-            'status' => (int)($data['status'] ?? 1),
-            'phone_code' => (string)($data['phone_code'] ?? ''),
-            'native' => (string)($data['native'] ?? $data['name']),
-            'region' => (string)($data['region'] ?? ''),
-            'subregion' => (string)($data['subregion'] ?? ''),
-            'latitude' => (string)($data['latitude'] ?? '0'),
-            'longitude' => (string)($data['longitude'] ?? '0'),
-            'emoji' => (string)($data['emoji'] ?? ''),
-            'emojiU' => (string)($data['emojiU'] ?? ''),
+            'status' => (int) ($data['status'] ?? 1),
+            'phone_code' => (string) ($data['phone_code'] ?? ''),
+            'native' => (string) ($data['native'] ?? $data['name']),
+            'region' => (string) ($data['region'] ?? ''),
+            'subregion' => (string) ($data['subregion'] ?? ''),
+            'latitude' => (string) ($data['latitude'] ?? '0'),
+            'longitude' => (string) ($data['longitude'] ?? '0'),
+            'emoji' => (string) ($data['emoji'] ?? ''),
+            'emojiU' => (string) ($data['emojiU'] ?? ''),
         ]);
 
         return $country->load('currency');
     }
 
     /**
-     * @param array<string, mixed> $data
+     * Update a country, normalizing and uniqueness-checking ISO codes when present.
+     *
+     * @param  array<string, mixed>  $data
      */
     public function updateCountry(Country $country, array $data): Country
     {
         if (isset($data['iso2'])) {
-            $iso2 = Str::upper((string)$data['iso2']);
+            $iso2 = Str::upper((string) $data['iso2']);
             $exists = Country::query()
                 ->where('iso2', $iso2)
                 ->whereKeyNot($country->id)
@@ -139,7 +155,7 @@ final class WorldService
         }
 
         if (isset($data['iso3'])) {
-            $data['iso3'] = Str::upper((string)$data['iso3']);
+            $data['iso3'] = Str::upper((string) $data['iso3']);
         }
 
         $country->update($data);
@@ -147,12 +163,17 @@ final class WorldService
         return $country->fresh(['currency']);
     }
 
+    /**
+     * Soft-delete or remove a country record.
+     */
     public function deleteCountry(Country $country): void
     {
         $country->delete();
     }
 
     /**
+     * List states belonging to a country identified by ISO2.
+     *
      * @return Collection<int, State>
      */
     public function statesForCountry(string $iso2): Collection
@@ -170,19 +191,21 @@ final class WorldService
     }
 
     /**
-     * @param array{search?: string, country_id?: int, per_page?: int} $filters
+     * Paginate states for central admin listing.
+     *
+     * @param  array{search?: string, country_id?: int, per_page?: int}  $filters
      * @return LengthAwarePaginator<int, State>
      */
     public function paginateStates(array $filters = []): LengthAwarePaginator
     {
-        $perPage = min((int)($filters['per_page'] ?? 15), 100);
+        $perPage = min((int) ($filters['per_page'] ?? 15), 100);
 
         return State::query()
             ->with('country')
-            ->when($filters['country_id'] ?? null, fn($q, $id) => $q->where('country_id', $id))
+            ->when($filters['country_id'] ?? null, fn ($q, $id) => $q->where('country_id', $id))
             ->when(
                 $filters['search'] ?? null,
-                fn($query, string $search) => $query->where(function ($q) use ($search): void {
+                fn ($query, string $search) => $query->where(function ($q) use ($search): void {
                     $q->where('name', 'like', "%{$search}%")
                         ->orWhere('state_code', 'like', "%{$search}%")
                         ->orWhere('country_code', 'like', "%{$search}%");
@@ -193,7 +216,9 @@ final class WorldService
     }
 
     /**
-     * @param array<string, mixed> $data
+     * Create a state and load its country relation.
+     *
+     * @param  array<string, mixed>  $data
      */
     public function createState(array $data): State
     {
@@ -201,7 +226,9 @@ final class WorldService
     }
 
     /**
-     * @param array<string, mixed> $data
+     * Update a state and refresh its country relation.
+     *
+     * @param  array<string, mixed>  $data
      */
     public function updateState(State $state, array $data): State
     {
@@ -210,12 +237,17 @@ final class WorldService
         return $state->fresh(['country']);
     }
 
+    /**
+     * Soft-delete or remove a state record.
+     */
     public function deleteState(State $state): void
     {
         $state->delete();
     }
 
     /**
+     * List cities belonging to a state.
+     *
      * @return Collection<int, City>
      */
     public function citiesForState(int $stateId): Collection
@@ -227,20 +259,22 @@ final class WorldService
     }
 
     /**
-     * @param array{search?: string, country_id?: int, state_id?: int, per_page?: int} $filters
+     * Paginate cities for central admin listing.
+     *
+     * @param  array{search?: string, country_id?: int, state_id?: int, per_page?: int}  $filters
      * @return LengthAwarePaginator<int, City>
      */
     public function paginateCities(array $filters = []): LengthAwarePaginator
     {
-        $perPage = min((int)($filters['per_page'] ?? 15), 100);
+        $perPage = min((int) ($filters['per_page'] ?? 15), 100);
 
         return City::query()
             ->with(['country', 'state'])
-            ->when($filters['country_id'] ?? null, fn($q, $id) => $q->where('country_id', $id))
-            ->when($filters['state_id'] ?? null, fn($q, $id) => $q->where('state_id', $id))
+            ->when($filters['country_id'] ?? null, fn ($q, $id) => $q->where('country_id', $id))
+            ->when($filters['state_id'] ?? null, fn ($q, $id) => $q->where('state_id', $id))
             ->when(
                 $filters['search'] ?? null,
-                fn($query, string $search) => $query->where(function ($q) use ($search): void {
+                fn ($query, string $search) => $query->where(function ($q) use ($search): void {
                     $q->where('name', 'like', "%{$search}%")
                         ->orWhere('country_code', 'like', "%{$search}%")
                         ->orWhere('state_code', 'like', "%{$search}%");
@@ -251,7 +285,9 @@ final class WorldService
     }
 
     /**
-     * @param array<string, mixed> $data
+     * Create a city and load its country and state relations.
+     *
+     * @param  array<string, mixed>  $data
      */
     public function createCity(array $data): City
     {
@@ -259,7 +295,9 @@ final class WorldService
     }
 
     /**
-     * @param array<string, mixed> $data
+     * Update a city and refresh its country and state relations.
+     *
+     * @param  array<string, mixed>  $data
      */
     public function updateCity(City $city, array $data): City
     {
@@ -268,18 +306,23 @@ final class WorldService
         return $city->fresh(['country', 'state']);
     }
 
+    /**
+     * Soft-delete or remove a city record.
+     */
     public function deleteCity(City $city): void
     {
         $city->delete();
     }
 
     /**
-     * @param array{search?: string, country_id?: int, per_page?: int} $filters
+     * Paginate currencies for central admin listing.
+     *
+     * @param  array{search?: string, country_id?: int, per_page?: int}  $filters
      * @return LengthAwarePaginator<int, Currency>
      */
     public function paginateCurrencies(array $filters = []): LengthAwarePaginator
     {
-        $perPage = min((int)($filters['per_page'] ?? 15), 100);
+        $perPage = min((int) ($filters['per_page'] ?? 15), 100);
 
         return $this->currencyQuery($filters)
             ->with('country')
@@ -288,15 +331,18 @@ final class WorldService
     }
 
     /**
-     * @param array{search?: string, country_id?: int} $filters
+     * Build a filtered currency query.
+     *
+     * @param  array{search?: string, country_id?: int}  $filters
+     * @return Builder<Currency>
      */
-    private function currencyQuery(array $filters)
+    private function currencyQuery(array $filters): Builder
     {
         return Currency::query()
-            ->when($filters['country_id'] ?? null, fn($q, $id) => $q->where('country_id', $id))
+            ->when($filters['country_id'] ?? null, fn ($q, $id) => $q->where('country_id', $id))
             ->when(
                 $filters['search'] ?? null,
-                fn($query, string $search) => $query->where(function ($q) use ($search): void {
+                fn ($query, string $search) => $query->where(function ($q) use ($search): void {
                     $q->where('name', 'like', "%{$search}%")
                         ->orWhere('code', 'like', "%{$search}%")
                         ->orWhere('symbol', 'like', "%{$search}%");
@@ -305,7 +351,9 @@ final class WorldService
     }
 
     /**
-     * @param array<string, mixed> $data
+     * Create a currency and load its country relation.
+     *
+     * @param  array<string, mixed>  $data
      */
     public function createCurrency(array $data): Currency
     {
@@ -313,7 +361,9 @@ final class WorldService
     }
 
     /**
-     * @param array<string, mixed> $data
+     * Update a currency and refresh its country relation.
+     *
+     * @param  array<string, mixed>  $data
      */
     public function updateCurrency(Currency $currency, array $data): Currency
     {
@@ -322,13 +372,18 @@ final class WorldService
         return $currency->fresh(['country']);
     }
 
+    /**
+     * Soft-delete or remove a currency record.
+     */
     public function deleteCurrency(Currency $currency): void
     {
         $currency->delete();
     }
 
     /**
-     * @param array{search?: string, country_id?: int} $filters
+     * List timezones matching optional search and country filters.
+     *
+     * @param  array{search?: string, country_id?: int}  $filters
      * @return Collection<int, Timezone>
      */
     public function timezones(array $filters = []): Collection
@@ -337,28 +392,33 @@ final class WorldService
     }
 
     /**
-     * @param array{search?: string, country_id?: int} $filters
+     * Build a filtered timezone query.
+     *
+     * @param  array{search?: string, country_id?: int}  $filters
+     * @return Builder<Timezone>
      */
-    private function timezoneQuery(array $filters)
+    private function timezoneQuery(array $filters): Builder
     {
         return Timezone::query()
             ->when(
                 $filters['search'] ?? null,
-                fn($query, string $search) => $query->where('name', 'like', "%{$search}%")
+                fn ($query, string $search) => $query->where('name', 'like', "%{$search}%")
             )
             ->when(
                 $filters['country_id'] ?? null,
-                fn($query, int $countryId) => $query->where('country_id', $countryId)
+                fn ($query, int $countryId) => $query->where('country_id', $countryId)
             );
     }
 
     /**
-     * @param array{search?: string, country_id?: int, per_page?: int} $filters
+     * Paginate timezones for central admin listing.
+     *
+     * @param  array{search?: string, country_id?: int, per_page?: int}  $filters
      * @return LengthAwarePaginator<int, Timezone>
      */
     public function paginateTimezones(array $filters = []): LengthAwarePaginator
     {
-        $perPage = min((int)($filters['per_page'] ?? 15), 100);
+        $perPage = min((int) ($filters['per_page'] ?? 15), 100);
 
         return $this->timezoneQuery($filters)
             ->with('country')
@@ -367,7 +427,9 @@ final class WorldService
     }
 
     /**
-     * @param array<string, mixed> $data
+     * Create a timezone and load its country relation.
+     *
+     * @param  array<string, mixed>  $data
      */
     public function createTimezone(array $data): Timezone
     {
@@ -375,7 +437,9 @@ final class WorldService
     }
 
     /**
-     * @param array<string, mixed> $data
+     * Update a timezone and refresh its country relation.
+     *
+     * @param  array<string, mixed>  $data
      */
     public function updateTimezone(Timezone $timezone, array $data): Timezone
     {
@@ -384,13 +448,18 @@ final class WorldService
         return $timezone->fresh(['country']);
     }
 
+    /**
+     * Soft-delete or remove a timezone record.
+     */
     public function deleteTimezone(Timezone $timezone): void
     {
         $timezone->delete();
     }
 
     /**
-     * @param array{search?: string} $filters
+     * List languages matching optional search filters.
+     *
+     * @param  array{search?: string}  $filters
      * @return Collection<int, Language>
      */
     public function languages(array $filters = []): Collection
@@ -399,14 +468,17 @@ final class WorldService
     }
 
     /**
-     * @param array{search?: string, dir?: string} $filters
+     * Build a filtered language query.
+     *
+     * @param  array{search?: string, dir?: string}  $filters
+     * @return Builder<Language>
      */
-    private function languageQuery(array $filters)
+    private function languageQuery(array $filters): Builder
     {
         return Language::query()
             ->when(
                 $filters['search'] ?? null,
-                fn($query, string $search) => $query->where(function ($q) use ($search): void {
+                fn ($query, string $search) => $query->where(function ($q) use ($search): void {
                     $q->where('name', 'like', "%{$search}%")
                         ->orWhere('code', 'like', "%{$search}%")
                         ->orWhere('name_native', 'like', "%{$search}%");
@@ -414,17 +486,19 @@ final class WorldService
             )
             ->when(
                 $filters['dir'] ?? null,
-                fn($query, string $dir) => $query->where('dir', $dir)
+                fn ($query, string $dir) => $query->where('dir', $dir)
             );
     }
 
     /**
-     * @param array{search?: string, dir?: string, per_page?: int} $filters
+     * Paginate languages for central admin listing.
+     *
+     * @param  array{search?: string, dir?: string, per_page?: int}  $filters
      * @return LengthAwarePaginator<int, Language>
      */
     public function paginateLanguages(array $filters = []): LengthAwarePaginator
     {
-        $perPage = min((int)($filters['per_page'] ?? 15), 100);
+        $perPage = min((int) ($filters['per_page'] ?? 15), 100);
 
         return $this->languageQuery($filters)
             ->orderBy('name')
@@ -432,7 +506,9 @@ final class WorldService
     }
 
     /**
-     * @param array<string, mixed> $data
+     * Create a language record.
+     *
+     * @param  array<string, mixed>  $data
      */
     public function createLanguage(array $data): Language
     {
@@ -440,7 +516,9 @@ final class WorldService
     }
 
     /**
-     * @param array<string, mixed> $data
+     * Update a language and return a fresh instance.
+     *
+     * @param  array<string, mixed>  $data
      */
     public function updateLanguage(Language $language, array $data): Language
     {
@@ -449,27 +527,34 @@ final class WorldService
         return $language->fresh();
     }
 
+    /**
+     * Soft-delete or remove a language record.
+     */
     public function deleteLanguage(Language $language): void
     {
         $language->delete();
     }
 
     /**
+     * Active country ISO2 codes as value/label pairs for comboboxes.
+     *
      * @return list<array{value: string, label: string}>
      */
     public function countryOptions(?string $search = null): array
     {
         return $this->countries(array_filter(['search' => $search]))
-            ->map(fn(Country $country): array => [
-                'value' => (string)$country->iso2,
-                'label' => (string)$country->name,
+            ->map(fn (Country $country): array => [
+                'value' => (string) $country->iso2,
+                'label' => (string) $country->name,
             ])
             ->values()
             ->all();
     }
 
     /**
-     * @param array{search?: string, status?: int} $filters
+     * List countries matching optional search, status, and region filters.
+     *
+     * @param  array{search?: string, status?: int}  $filters
      * @return Collection<int, Country>
      */
     public function countries(array $filters = []): Collection
@@ -485,9 +570,9 @@ final class WorldService
     public function countryIdOptions(?string $search = null): array
     {
         return $this->countries(array_filter(['search' => $search]))
-            ->map(fn(Country $country): array => [
-                'value' => (string)$country->getKey(),
-                'label' => (string)$country->name,
+            ->map(fn (Country $country): array => [
+                'value' => (string) $country->getKey(),
+                'label' => (string) $country->name,
             ])
             ->values()
             ->all();
@@ -504,16 +589,16 @@ final class WorldService
             ->where('country_id', $countryId)
             ->when(
                 filled($search),
-                fn($query) => $query->where(function ($nested) use ($search): void {
+                fn ($query) => $query->where(function ($nested) use ($search): void {
                     $nested->where('name', 'like', "%{$search}%")
                         ->orWhere('state_code', 'like', "%{$search}%");
                 }),
             )
             ->orderBy('name')
             ->get()
-            ->map(fn(State $state): array => [
-                'value' => (string)$state->getKey(),
-                'label' => (string)$state->name,
+            ->map(fn (State $state): array => [
+                'value' => (string) $state->getKey(),
+                'label' => (string) $state->name,
             ])
             ->values()
             ->all();
@@ -527,12 +612,12 @@ final class WorldService
     public function currencyOptions(?string $search = null): array
     {
         return $this->currencies(array_filter(['search' => $search]))
-            ->unique(fn(Currency $currency): string => Str::upper((string)$currency->code))
-            ->sortBy(fn(Currency $currency): string => Str::upper((string)$currency->code))
+            ->unique(fn (Currency $currency): string => Str::upper((string) $currency->code))
+            ->sortBy(fn (Currency $currency): string => Str::upper((string) $currency->code))
             ->map(function (Currency $currency): array {
-                $code = Str::upper((string)$currency->code);
-                $name = (string)$currency->name;
-                $symbol = filled($currency->symbol) ? (string)$currency->symbol : null;
+                $code = Str::upper((string) $currency->code);
+                $name = (string) $currency->name;
+                $symbol = filled($currency->symbol) ? (string) $currency->symbol : null;
 
                 return [
                     'value' => $code,
@@ -546,7 +631,9 @@ final class WorldService
     }
 
     /**
-     * @param array{search?: string} $filters
+     * List currencies matching optional search filters.
+     *
+     * @param  array{search?: string}  $filters
      * @return Collection<int, Currency>
      */
     public function currencies(array $filters = []): Collection
@@ -555,6 +642,8 @@ final class WorldService
     }
 
     /**
+     * Aggregate counts for the world admin overview dashboard.
+     *
      * @return array{
      *     countries: int,
      *     states: int,

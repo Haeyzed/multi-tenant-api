@@ -25,6 +25,13 @@ class RollbackVersionRequest extends FormRequest
     public function rules(): array
     {
         return [
+            /**
+             * Platform version identifier to roll back to.
+             *
+             * @var int
+             *
+             * @example 12
+             */
             'target_version_id' => ['required', 'integer', 'exists:platform_versions,id'],
         ];
     }

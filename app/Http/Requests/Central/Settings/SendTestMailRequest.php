@@ -11,6 +11,9 @@ use Illuminate\Foundation\Http\FormRequest;
  */
 class SendTestMailRequest extends FormRequest
 {
+    /**
+     * Determine if the user is authorized to make this request.
+     */
     public function authorize(): bool
     {
         return $this->user()?->can('settings.update') ?? false;
@@ -22,6 +25,13 @@ class SendTestMailRequest extends FormRequest
     public function rules(): array
     {
         return [
+            /**
+             * Recipient address for the test email.
+             *
+             * @var string
+             *
+             * @example ops@example.test
+             */
             'email' => ['required', 'email', 'max:255'],
         ];
     }
