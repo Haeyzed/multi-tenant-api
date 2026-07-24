@@ -33,13 +33,15 @@ return new class extends Migration
         Schema::create('subscriptions', function (Blueprint $table): void {
             $table->id();
             $table->string('tenant_id');
-            $table->foreignId('plan_id')->constrained()->restrictOnDelete();
+            $table->foreignId('plan_id')->constrained('plans')->restrictOnDelete();
+            $table->foreignId('plan_price_id')->nullable()->constrained('plan_prices')->nullOnDelete();
             $table->string('status')->default('pending')->index();
             $table->string('billing_interval')->default('monthly');
             $table->decimal('price', 12, 2);
             $table->string('currency', 3)->default('USD');
             $table->string('gateway')->nullable();
             $table->string('gateway_subscription_id')->nullable()->index();
+            $table->foreignId('default_payment_method_id')->nullable()->constrained('payment_methods')->nullOnDelete();
             $table->timestamp('trial_ends_at')->nullable();
             $table->timestamp('starts_at')->nullable();
             $table->timestamp('ends_at')->nullable();
@@ -61,7 +63,7 @@ return new class extends Migration
 
         Schema::create('subscription_histories', function (Blueprint $table): void {
             $table->id();
-            $table->foreignId('subscription_id')->constrained()->cascadeOnDelete();
+            $table->foreignId('subscription_id')->constrained('subscriptions')->cascadeOnDelete();
             $table->string('event');
             $table->string('from_status')->nullable();
             $table->string('to_status')->nullable();
@@ -75,8 +77,9 @@ return new class extends Migration
         Schema::create('invoices', function (Blueprint $table): void {
             $table->id();
             $table->string('tenant_id');
-            $table->foreignId('subscription_id')->nullable()->constrained()->nullOnDelete();
-            $table->foreignId('billing_address_id')->nullable()->constrained()->nullOnDelete();
+            $table->foreignId('subscription_id')->nullable()->constrained('subscriptions')->nullOnDelete();
+            $table->string('idempotency_key')->nullable()->unique();
+            $table->foreignId('billing_address_id')->nullable()->constrained('billing_addresses')->nullOnDelete();
             $table->string('number')->unique();
             $table->string('status')->default('draft')->index();
             $table->decimal('subtotal', 12, 2)->default(0);
@@ -99,7 +102,7 @@ return new class extends Migration
 
         Schema::create('invoice_items', function (Blueprint $table): void {
             $table->id();
-            $table->foreignId('invoice_id')->constrained()->cascadeOnDelete();
+            $table->foreignId('invoice_id')->constrained('invoices')->cascadeOnDelete();
             $table->string('description');
             $table->unsignedInteger('quantity')->default(1);
             $table->decimal('unit_price', 12, 2);
@@ -111,8 +114,8 @@ return new class extends Migration
         Schema::create('payments', function (Blueprint $table): void {
             $table->id();
             $table->string('tenant_id');
-            $table->foreignId('invoice_id')->nullable()->constrained()->nullOnDelete();
-            $table->foreignId('subscription_id')->nullable()->constrained()->nullOnDelete();
+            $table->foreignId('invoice_id')->nullable()->constrained('invoices')->nullOnDelete();
+            $table->foreignId('subscription_id')->nullable()->constrained('subscriptions')->nullOnDelete();
             $table->string('gateway');
             $table->string('status')->default('pending')->index();
             $table->decimal('amount', 12, 2);
@@ -128,7 +131,7 @@ return new class extends Migration
 
         Schema::create('payment_attempts', function (Blueprint $table): void {
             $table->id();
-            $table->foreignId('payment_id')->constrained()->cascadeOnDelete();
+            $table->foreignId('payment_id')->constrained('payments')->cascadeOnDelete();
             $table->unsignedInteger('attempt_number')->default(1);
             $table->string('status');
             $table->string('gateway_reference')->nullable();
@@ -139,7 +142,7 @@ return new class extends Migration
 
         Schema::create('payment_logs', function (Blueprint $table): void {
             $table->id();
-            $table->foreignId('payment_id')->nullable()->constrained()->nullOnDelete();
+            $table->foreignId('payment_id')->nullable()->constrained('payments')->nullOnDelete();
             $table->string('tenant_id')->nullable();
             $table->string('gateway')->nullable();
             $table->string('event');
@@ -153,7 +156,7 @@ return new class extends Migration
 
         Schema::create('refunds', function (Blueprint $table): void {
             $table->id();
-            $table->foreignId('payment_id')->constrained()->cascadeOnDelete();
+            $table->foreignId('payment_id')->constrained('payments')->cascadeOnDelete();
             $table->string('tenant_id');
             $table->decimal('amount', 12, 2);
             $table->string('currency', 3)->default('USD');

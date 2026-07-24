@@ -9,7 +9,9 @@ use App\Http\Requests\Tenant\Auth\RedeemImpersonationRequest;
 use App\Http\Requests\Tenant\Auth\SetupPasswordRequest;
 use App\Http\Requests\Tenant\Auth\TenantLoginRequest;
 use App\Http\Resources\Tenant\TenantUserResource;
+use App\Models\Central\Tenant;
 use App\Models\Tenant\User as TenantUser;
+use App\Services\Central\Billing\EntitlementService;
 use App\Services\Tenant\Auth\TenantAuthService;
 use Dedoc\Scramble\Attributes\Endpoint;
 use Dedoc\Scramble\Attributes\Group;
@@ -21,6 +23,7 @@ final class AuthController extends Controller
 {
     public function __construct(
         private readonly TenantAuthService $authService,
+        private readonly EntitlementService $entitlements,
     ) {}
 
     #[Endpoint(operationId: 'tenant.auth.setupPassword', title: 'Setup owner password', description: 'Accept an invite token and set the owner password.')]
@@ -73,7 +76,13 @@ final class AuthController extends Controller
         /** @var TenantUser $user */
         $user = $request->user();
 
-        return $this->success(new TenantUserResource($user), 'Profile retrieved successfully.');
+        /** @var Tenant $tenant */
+        $tenant = tenant();
+
+        return $this->success([
+            ...(new TenantUserResource($user))->resolve(),
+            'entitlements' => $this->entitlements->summaryForTenant($tenant),
+        ], 'Profile retrieved successfully.');
     }
 
     #[Endpoint(operationId: 'tenant.auth.logout', title: 'Tenant logout', description: 'Revoke the current tenant Sanctum token.')]

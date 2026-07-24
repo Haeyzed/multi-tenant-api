@@ -2,18 +2,20 @@
 
 declare(strict_types=1);
 
-use App\Enums\Central\PlanStatus;
 use App\Enums\Central\PaymentGateway;
+use App\Enums\Central\PlanStatus;
 use App\Enums\Central\PlanVisibility;
 use App\Enums\Central\SettingGroup;
 use App\Enums\Central\SettingType;
 use App\Enums\Central\SignupIntentStatus;
 use App\Enums\Central\SubscriptionStatus;
 use App\Enums\Central\TenantStatus;
+use App\Models\Central\BillingProfile;
 use App\Models\Central\PaymentMethod;
 use App\Models\Central\Plan;
 use App\Models\Central\Setting;
 use App\Models\Central\SignupIntent;
+use App\Models\Central\SubscriptionHistory;
 use App\Models\Central\Tenant;
 use App\Services\Central\Billing\CardVerificationService;
 use App\Services\Central\Settings\SettingService;
@@ -170,6 +172,9 @@ it('completes signup after successful card verification', function (): void {
 
     expect($tenant)->not->toBeNull()
         ->and(PaymentMethod::query()->where('tenant_id', $tenant->id)->where('is_default', true)->exists())->toBeTrue()
+        ->and(BillingProfile::query()->where('tenant_id', $tenant->id)->first()?->preferred_gateway)->toBe('paystack')
+        ->and(BillingProfile::query()->where('tenant_id', $tenant->id)->first()?->currency)->toBe('NGN')
+        ->and(SubscriptionHistory::query()->where('event', 'created')->whereHas('subscription', fn ($q) => $q->where('tenant_id', $tenant->id))->exists())->toBeTrue()
         ->and($intent->fresh()->status)->toBe(SignupIntentStatus::Completed)
         ->and($intent->fresh()->password_secret)->toBeNull()
         ->and($intent->fresh()->payload)->not->toHaveKeys(['password', 'password_confirmation']);

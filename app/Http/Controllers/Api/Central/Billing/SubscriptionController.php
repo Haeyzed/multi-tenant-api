@@ -4,8 +4,12 @@ declare(strict_types=1);
 
 namespace App\Http\Controllers\Api\Central\Billing;
 
-use App\Enums\Central\PlanStatus;
 use App\Http\Controllers\Controller;
+use App\Http\Requests\Central\Billing\CancelSubscriptionRequest;
+use App\Http\Requests\Central\Billing\ChangeSubscriptionPlanRequest;
+use App\Http\Requests\Central\Billing\MarkSubscriptionPastDueRequest;
+use App\Http\Requests\Central\Billing\StoreSubscriptionRequest;
+use App\Http\Requests\Central\Billing\SubscriptionOptionsRequest;
 use App\Http\Resources\Central\SubscriptionHistoryResource;
 use App\Http\Resources\Central\SubscriptionResource;
 use App\Models\Central\Plan;
@@ -13,11 +17,10 @@ use App\Models\Central\Subscription;
 use App\Models\User;
 use App\Services\Central\Billing\BillingSettings;
 use App\Services\Central\Billing\SubscriptionService;
-use Dedoc\Scramble\Attributes\Group;
 use Dedoc\Scramble\Attributes\Endpoint;
+use Dedoc\Scramble\Attributes\Group;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
-use Illuminate\Validation\Rule;
 
 #[Group('Central Subscriptions', description: 'Subscription lifecycle.', weight: 130)]
 final class SubscriptionController extends Controller
@@ -39,14 +42,9 @@ final class SubscriptionController extends Controller
     }
 
     #[Endpoint(operationId: 'billing.subscription.options', title: 'Subscription options', description: 'Return all subscription value/label pairs for comboboxes.')]
-    public function options(Request $request): JsonResponse
+    public function options(SubscriptionOptionsRequest $request): JsonResponse
     {
-        $this->authorize('viewAny', Subscription::class);
-
-        $data = $request->validate([
-            'tenant_id' => ['sometimes', 'nullable', 'string', 'exists:tenants,id'],
-            'search' => ['sometimes', 'nullable', 'string', 'max:255'],
-        ]);
+        $data = $request->validated();
 
         return $this->success(
             $this->subscriptionService->options(
@@ -69,36 +67,9 @@ final class SubscriptionController extends Controller
     }
 
     #[Endpoint(operationId: 'billing.subscription.store', title: 'Create subscription', description: 'Create a new subscription and return it.')]
-    public function store(Request $request): JsonResponse
+    public function store(StoreSubscriptionRequest $request): JsonResponse
     {
-        $this->authorize('create', Subscription::class);
-        $data = $request->validate([
-            'tenant_id' => ['required', 'string', 'exists:tenants,id'],
-            'plan_id' => [
-                'required',
-                'integer',
-                Rule::exists('plans', 'id')->where('status', PlanStatus::Active->value),
-            ],
-            'plan_price_id' => [
-                'sometimes',
-                'nullable',
-                'integer',
-                Rule::exists('plan_prices', 'id')->where('status', PlanStatus::Active->value),
-            ],
-            'country' => ['sometimes', 'nullable', 'string', 'size:2'],
-            'currency' => ['sometimes', 'nullable', 'string', 'size:3'],
-            'billing_interval' => ['sometimes', 'nullable', 'string', 'in:monthly,quarterly,yearly'],
-            'gateway' => ['sometimes', 'string'],
-            'trial_days' => ['sometimes', 'nullable', 'integer', 'min:0'],
-            'billing_address_id' => [
-                'sometimes',
-                'nullable',
-                'integer',
-                Rule::exists('billing_addresses', 'id')
-                    ->where(fn ($query) => $query->where('tenant_id', $request->input('tenant_id'))),
-            ],
-            'tax_rate' => ['sometimes', 'numeric', 'min:0', 'max:100'],
-        ]);
+        $data = $request->validated();
         $data['billing_interval'] ??= $this->billingSettings->defaultInterval()->value;
         $data['idempotency_key'] = $request->header('Idempotency-Key');
 
@@ -136,25 +107,9 @@ final class SubscriptionController extends Controller
     }
 
     #[Endpoint(operationId: 'billing.subscription.upgrade', title: 'Upgrade subscription', description: 'Move the subscription to a higher plan.')]
-    public function upgrade(Request $request, Subscription $subscription): JsonResponse
+    public function upgrade(ChangeSubscriptionPlanRequest $request, Subscription $subscription): JsonResponse
     {
-        $this->authorize('manage', $subscription);
-        $data = $request->validate([
-            'plan_id' => [
-                'required',
-                'integer',
-                Rule::exists('plans', 'id')->where('status', PlanStatus::Active->value),
-            ],
-            'plan_price_id' => [
-                'sometimes',
-                'nullable',
-                'integer',
-                Rule::exists('plan_prices', 'id')->where('status', PlanStatus::Active->value),
-            ],
-            'country' => ['sometimes', 'nullable', 'string', 'size:2'],
-            'currency' => ['sometimes', 'nullable', 'string', 'size:3'],
-            'billing_interval' => ['sometimes', 'nullable', 'string', 'in:monthly,quarterly,yearly'],
-        ]);
+        $data = $request->validated();
         $plan = Plan::query()->findOrFail($data['plan_id']);
         /** @var User $user */
         $user = $request->user();
@@ -174,25 +129,9 @@ final class SubscriptionController extends Controller
     }
 
     #[Endpoint(operationId: 'billing.subscription.downgrade', title: 'Downgrade subscription', description: 'Move the subscription to a lower plan.')]
-    public function downgrade(Request $request, Subscription $subscription): JsonResponse
+    public function downgrade(ChangeSubscriptionPlanRequest $request, Subscription $subscription): JsonResponse
     {
-        $this->authorize('manage', $subscription);
-        $data = $request->validate([
-            'plan_id' => [
-                'required',
-                'integer',
-                Rule::exists('plans', 'id')->where('status', PlanStatus::Active->value),
-            ],
-            'plan_price_id' => [
-                'sometimes',
-                'nullable',
-                'integer',
-                Rule::exists('plan_prices', 'id')->where('status', PlanStatus::Active->value),
-            ],
-            'country' => ['sometimes', 'nullable', 'string', 'size:2'],
-            'currency' => ['sometimes', 'nullable', 'string', 'size:3'],
-            'billing_interval' => ['sometimes', 'nullable', 'string', 'in:monthly,quarterly,yearly'],
-        ]);
+        $data = $request->validated();
         $plan = Plan::query()->findOrFail($data['plan_id']);
         /** @var User $user */
         $user = $request->user();
@@ -238,20 +177,16 @@ final class SubscriptionController extends Controller
     }
 
     #[Endpoint(operationId: 'billing.subscription.cancel', title: 'Cancel subscription', description: 'Cancel a scheduled, draft, or active subscription.')]
-    public function cancel(Request $request, Subscription $subscription): JsonResponse
+    public function cancel(CancelSubscriptionRequest $request, Subscription $subscription): JsonResponse
     {
-        $this->authorize('manage', $subscription);
-        $data = $request->validate([
-            'immediately' => ['sometimes', 'boolean'],
-            'reason' => ['sometimes', 'nullable', 'string', 'max:500'],
-        ]);
+        $data = $request->validated();
         /** @var User $user */
         $user = $request->user();
 
         return $this->success(
             new SubscriptionResource($this->subscriptionService->cancel(
                 $subscription,
-                (bool)($data['immediately'] ?? false),
+                (bool) ($data['immediately'] ?? false),
                 $data['reason'] ?? null,
                 $user
             )),
@@ -273,10 +208,9 @@ final class SubscriptionController extends Controller
     }
 
     #[Endpoint(operationId: 'billing.subscription.markPastDue', title: 'Mark past due', description: 'Mark past due and optionally start grace period.')]
-    public function markPastDue(Request $request, Subscription $subscription): JsonResponse
+    public function markPastDue(MarkSubscriptionPastDueRequest $request, Subscription $subscription): JsonResponse
     {
-        $this->authorize('manage', $subscription);
-        $data = $request->validate(['grace_days' => ['sometimes', 'integer', 'min:1', 'max:30']]);
+        $data = $request->validated();
         /** @var User $user */
         $user = $request->user();
 
@@ -301,4 +235,3 @@ final class SubscriptionController extends Controller
         );
     }
 }
-

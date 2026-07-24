@@ -27,13 +27,11 @@ use Throwable;
 final class SignupIntentService
 {
     public function __construct(
-        private readonly TenantSignupService     $tenantSignupService,
+        private readonly TenantSignupService $tenantSignupService,
         private readonly CardVerificationService $cardVerification,
-        private readonly PaymentGatewayResolver  $gatewayResolver,
-        private readonly TenantSettings          $tenantSettings,
-    )
-    {
-    }
+        private readonly PaymentGatewayResolver $gatewayResolver,
+        private readonly TenantSettings $tenantSettings,
+    ) {}
 
     /**
      * Resolve signup currency and customer-facing gateways for a country.
@@ -42,33 +40,35 @@ final class SignupIntentService
      */
     public function paymentOptions(string $country): array
     {
+        $country = Str::upper(trim($country));
         $currency = $this->cardVerification->resolveCurrency($country);
 
         return [
             'currency' => $currency,
-            'gateways' => $this->gatewayResolver->optionsForCurrency($currency),
+            'gateways' => $this->gatewayResolver->optionsForCurrency($currency, $country),
         ];
     }
 
     /**
      * Validate signup data and start a provider card setup session.
      *
-     * @param array<string, mixed> $data
+     * @param  array<string, mixed>  $data
      * @return array{signup_intent_id: string, checkout_url: string, gateway: string, currency: string, expires_at: string}
      *
      * @throws ValidationException|Throwable
      */
     public function setup(array $data): array
     {
-        $this->assertPlanIsPublic((int)$data['plan_id']);
+        $this->assertPlanIsPublic((int) $data['plan_id']);
 
-        $currency = $this->cardVerification->resolveCurrency((string)$data['country']);
-        $available = collect($this->gatewayResolver->optionsForCurrency($currency))
+        $country = Str::upper(trim((string) $data['country']));
+        $currency = $this->cardVerification->resolveCurrency($country);
+        $available = collect($this->gatewayResolver->optionsForCurrency($currency, $country))
             ->pluck('value')
             ->all();
-        $gateway = Str::lower(trim((string)($data['gateway'] ?? '')));
+        $gateway = Str::lower(trim((string) ($data['gateway'] ?? '')));
 
-        if ($gateway === '' || !in_array($gateway, $available, true)) {
+        if ($gateway === '' || ! in_array($gateway, $available, true)) {
             throw ValidationException::withMessages([
                 'gateway' => ['Select a payment provider that supports this currency.'],
             ]);
@@ -78,44 +78,44 @@ final class SignupIntentService
 
         $intent = SignupIntent::query()->create([
             'status' => SignupIntentStatus::Pending,
-            'email' => (string)$data['email'],
+            'email' => (string) $data['email'],
             'gateway' => PaymentGateway::from($gateway),
             'currency' => $currency,
             'verification_amount' => $amount,
             'payload' => Arr::except($data, ['password', 'password_confirmation']),
-            'password_secret' => (string)$data['password'],
+            'password_secret' => (string) $data['password'],
             'expires_at' => now()->addHours($this->tenantSettings->signupIntentTtlHours()),
         ]);
 
-        $frontendBase = rtrim((string)config('billing.frontend_url'), '/');
+        $frontendBase = rtrim((string) config('billing.frontend_url'), '/');
         $completePath = str_replace(
             '{intent}',
             $intent->id,
-            (string)config('billing.frontend_signup_complete_path', '/central/signup/complete/{intent}'),
+            (string) config('billing.frontend_signup_complete_path', '/central/signup/complete/{intent}'),
         );
-        $cancelPath = (string)config('billing.frontend_signup_cancel_path', '/central/signup');
+        $cancelPath = (string) config('billing.frontend_signup_cancel_path', '/central/signup');
 
-        $successUrl = $frontendBase . $completePath;
+        $successUrl = $frontendBase.$completePath;
         if ($gateway === 'stripe') {
-            $successUrl .= (str_contains($completePath, '?') ? '&' : '?') . 'session_id={CHECKOUT_SESSION_ID}';
+            $successUrl .= (str_contains($completePath, '?') ? '&' : '?').'session_id={CHECKOUT_SESSION_ID}';
         }
 
-        $cancelUrl = $frontendBase . $cancelPath . (str_contains($cancelPath, '?') ? '&' : '?') . 'cancelled=1';
+        $cancelUrl = $frontendBase.$cancelPath.(str_contains($cancelPath, '?') ? '&' : '?').'cancelled=1';
 
         $session = $this->cardVerification->startSetup($gateway, [
-            'email' => (string)$data['email'],
+            'email' => (string) $data['email'],
             'currency' => $currency,
             'amount' => $amount,
             'success_url' => $successUrl,
             'cancel_url' => $cancelUrl,
-            'reference' => 'SIGNUP_' . Str::upper(Str::replace('-', '', $intent->id)),
+            'reference' => 'SIGNUP_'.Str::upper(Str::replace('-', '', $intent->id)),
             'metadata' => [
                 'signup_intent_id' => $intent->id,
-                'name' => (string)($data['owner_name'] ?? $data['name']),
+                'name' => (string) ($data['owner_name'] ?? $data['name']),
             ],
         ]);
 
-        if (!$session->successful || blank($session->checkoutUrl)) {
+        if (! $session->successful || blank($session->checkoutUrl)) {
             $intent->update([
                 'status' => SignupIntentStatus::Failed,
                 'password_secret' => null,
@@ -145,7 +145,7 @@ final class SignupIntentService
     {
         $plan = Plan::query()->findOrFail($planId);
 
-        if (!$plan->isPubliclyVisible()) {
+        if (! $plan->isPubliclyVisible()) {
             throw ValidationException::withMessages([
                 'plan_id' => ['The selected plan is not available for self-serve signup.'],
             ]);
@@ -155,7 +155,7 @@ final class SignupIntentService
     /**
      * Confirm provider setup and create the tenant when verification succeeds.
      *
-     * @param array<string, mixed> $providerParams
+     * @param  array<string, mixed>  $providerParams
      * @return array{tenant: Tenant, subscription: Subscription}
      *
      * @throws ValidationException|Throwable
@@ -164,7 +164,7 @@ final class SignupIntentService
     {
         try {
             return Cache::lock("signup-intent:complete:{$intentId}", 900)
-                ->block(5, fn(): array => $this->completeLocked($intentId, $providerParams));
+                ->block(5, fn (): array => $this->completeLocked($intentId, $providerParams));
         } catch (LockTimeoutException) {
             throw ValidationException::withMessages([
                 'signup_intent_id' => ['This signup session is already being completed. Please try again shortly.'],
@@ -173,7 +173,7 @@ final class SignupIntentService
     }
 
     /**
-     * @param array<string, mixed> $providerParams
+     * @param  array<string, mixed>  $providerParams
      * @return array{tenant: Tenant, subscription: Subscription}
      */
     private function completeLocked(string $intentId, array $providerParams): array
@@ -202,13 +202,13 @@ final class SignupIntentService
             ]);
         }
 
-        if (!in_array($intent->status, [SignupIntentStatus::Pending, SignupIntentStatus::Verified], true)) {
+        if (! in_array($intent->status, [SignupIntentStatus::Pending, SignupIntentStatus::Verified], true)) {
             throw ValidationException::withMessages([
                 'signup_intent_id' => ['This signup session cannot be completed.'],
             ]);
         }
 
-        $reference = (string)(
+        $reference = (string) (
             $providerParams['session_id']
             ?? $providerParams['trxref']
             ?? $providerParams['reference']
@@ -258,7 +258,7 @@ final class SignupIntentService
         $signupData = $this->sanitizedPayload($intent->payload);
         $password = $intent->password_secret ?? ($intent->payload['password'] ?? null);
 
-        if (!is_string($password) || $password === '') {
+        if (! is_string($password) || $password === '') {
             throw ValidationException::withMessages([
                 'signup_intent_id' => ['This signup session no longer contains valid owner credentials. Please start again.'],
             ]);
@@ -285,7 +285,7 @@ final class SignupIntentService
     }
 
     /**
-     * @param array<string, mixed> $payload
+     * @param  array<string, mixed>  $payload
      * @return array<string, mixed>
      */
     private function sanitizedPayload(array $payload): array

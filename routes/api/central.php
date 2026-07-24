@@ -28,9 +28,9 @@ use App\Http\Controllers\Api\Central\Settings\SettingController;
 use App\Http\Controllers\Api\Central\Support\TicketController;
 use App\Http\Controllers\Api\Central\Tenants\DomainController;
 use App\Http\Controllers\Api\Central\Tenants\TenantController;
+use App\Http\Controllers\Api\Central\Users\UserController;
 use App\Http\Controllers\Api\Central\World\WorldAdminController;
 use App\Http\Controllers\Api\Central\World\WorldController;
-use App\Http\Controllers\Api\Central\Users\UserController;
 use Illuminate\Support\Facades\Route;
 
 Route::middleware('throttle:auth')->group(function (): void {
@@ -250,6 +250,8 @@ Route::middleware(['auth:sanctum', 'throttle:api'])->group(function (): void {
     Route::post('payments/{payment}/refund', [BillingController::class, 'refundPayment'])->name('central.payments.refund');
 
     Route::post('tenants/{tenant}/billing-addresses', [BillingController::class, 'storeBillingAddress'])->name('central.billing-addresses.store');
+    Route::get('tenants/{tenant}/billing-profile', [BillingController::class, 'showBillingProfile'])->name('central.billing-profiles.show');
+    Route::put('tenants/{tenant}/billing-profile', [BillingController::class, 'updateBillingProfile'])->name('central.billing-profiles.update');
     Route::get('payment-gateways', [BillingController::class, 'gateways'])->name('central.payment-gateways.index');
     Route::get('payment-gateways/options', [BillingController::class, 'gatewayOptions'])->name('central.payment-gateways.options');
 

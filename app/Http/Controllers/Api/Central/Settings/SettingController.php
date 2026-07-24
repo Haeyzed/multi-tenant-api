@@ -6,6 +6,7 @@ namespace App\Http\Controllers\Api\Central\Settings;
 
 use App\Http\Controllers\Controller;
 use App\Http\Requests\Central\Settings\BulkUpdateSettingsRequest;
+use App\Http\Requests\Central\Settings\SendTestMailRequest;
 use App\Http\Requests\Central\Settings\StoreSettingRequest;
 use App\Http\Requests\Central\Settings\UpdateSettingRequest;
 use App\Http\Resources\Central\SettingResource;
@@ -26,8 +27,7 @@ final class SettingController extends Controller
     public function __construct(
         private readonly SettingService $settingService,
         private readonly ApplySettingsToConfig $applySettingsToConfig,
-    ) {
-    }
+    ) {}
 
     #[Endpoint(operationId: 'settings.setting.index', title: 'List settings', description: 'Return a paginated list of settings.')]
     public function index(Request $request): JsonResponse
@@ -59,7 +59,7 @@ final class SettingController extends Controller
         $this->authorize('viewAny', Setting::class);
 
         $grouped = collect($this->settingService->grouped($request->only(['group', 'search', 'public'])))
-            ->map(fn($items) => SettingResource::collection($items)->resolve());
+            ->map(fn ($items) => SettingResource::collection($items)->resolve());
 
         return $this->success($grouped, 'Grouped settings retrieved successfully.');
     }
@@ -109,18 +109,14 @@ final class SettingController extends Controller
     }
 
     #[Endpoint(operationId: 'settings.mail.test', title: 'Send test email', description: 'Send a test email using the current mail settings.')]
-    public function sendTestMail(Request $request): JsonResponse
+    public function sendTestMail(SendTestMailRequest $request): JsonResponse
     {
-        abort_unless($request->user()?->can('settings.update'), 403);
-
-        $data = $request->validate([
-            'email' => ['required', 'email', 'max:255'],
-        ]);
+        $email = $request->validated('email');
 
         ($this->applySettingsToConfig)();
 
         try {
-            Mail::to($data['email'])->send(new SettingsTestMail);
+            Mail::to($email)->send(new SettingsTestMail);
         } catch (Throwable $exception) {
             return $this->error(
                 'Failed to send test email: '.$exception->getMessage(),
@@ -129,7 +125,7 @@ final class SettingController extends Controller
         }
 
         return $this->success([
-            'email' => $data['email'],
+            'email' => $email,
             'mailer' => config('mail.default'),
         ], 'Test email sent successfully.');
     }
@@ -143,4 +139,3 @@ final class SettingController extends Controller
         return $this->success(null, 'Setting deleted successfully.');
     }
 }
-

@@ -8,6 +8,7 @@ use App\Enums\Tenant\UserStatus;
 use App\Mail\Tenant\WelcomeTenantOwner;
 use App\Models\Central\Tenant;
 use App\Models\Tenant\User as TenantUser;
+use App\Services\Tenant\TenantSettingService;
 use Illuminate\Support\Facades\Mail;
 use Illuminate\Support\Str;
 use Illuminate\Validation\ValidationException;
@@ -24,9 +25,8 @@ final class TenantOwnerProvisioningService
 {
     public function __construct(
         private readonly TenantSettings $tenantSettings,
-    )
-    {
-    }
+        private readonly TenantSettingService $settingService,
+    ) {}
 
     /**
      * Provision an active tenant owner with a known password.
@@ -34,16 +34,12 @@ final class TenantOwnerProvisioningService
      * Demo/backfill helper that skips invitation mail and marks the owner as
      * active with a verified email address.
      *
-     * @param Tenant $tenant
-     * @param string $password
-     * @param string|null $ownerName
-     * @return TenantUser
      *
      * @throws ValidationException|TenantCouldNotBeIdentifiedById
      */
     public function provisionWithPassword(Tenant $tenant, string $password, ?string $ownerName = null): TenantUser
     {
-        if (!filled($tenant->email)) {
+        if (! filled($tenant->email)) {
             throw ValidationException::withMessages([
                 'email' => ['Tenant email is required to provision an owner.'],
             ]);
@@ -56,7 +52,7 @@ final class TenantOwnerProvisioningService
             $user = TenantUser::query()->updateOrCreate(
                 ['email' => $tenant->email],
                 [
-                    'name' => $ownerName ?? $tenant->name . ' Owner',
+                    'name' => $ownerName ?? $tenant->name.' Owner',
                     'password' => $password,
                     'is_owner' => true,
                     'status' => UserStatus::Active,
@@ -70,6 +66,8 @@ final class TenantOwnerProvisioningService
                 ->where('id', '!=', $user->id)
                 ->where('is_owner', true)
                 ->update(['is_owner' => false]);
+
+            $this->settingService->seedDefaults((string) ($tenant->name ?? 'Store'));
         } finally {
             tenancy()->end();
         }
@@ -92,7 +90,6 @@ final class TenantOwnerProvisioningService
      *
      * Re-provisions the owner invitation and sends a new welcome mail.
      *
-     * @param Tenant $tenant
      * @return array{user: TenantUser, plain_token: string|null, setup_url: string|null}
      *
      * @throws ValidationException|TenantCouldNotBeIdentifiedById
@@ -108,16 +105,13 @@ final class TenantOwnerProvisioningService
      * Initializes tenant context, creates or updates the owner user with an
      * invitation token, ensures a single owner flag, and records invite metadata.
      *
-     * @param Tenant $tenant
-     * @param bool $sendMail
-     * @param string|null $ownerName
      * @return array{user: TenantUser, plain_token: string|null, setup_url: string|null}
      *
      * @throws ValidationException|TenantCouldNotBeIdentifiedById
      */
     public function provision(Tenant $tenant, bool $sendMail = true, ?string $ownerName = null): array
     {
-        if (!filled($tenant->email)) {
+        if (! filled($tenant->email)) {
             throw ValidationException::withMessages([
                 'email' => ['Tenant email is required to provision an owner invitation.'],
             ]);
@@ -141,7 +135,7 @@ final class TenantOwnerProvisioningService
             $user = TenantUser::query()->updateOrCreate(
                 ['email' => $tenant->email],
                 [
-                    'name' => $ownerName ?? $tenant->name . ' Owner',
+                    'name' => $ownerName ?? $tenant->name.' Owner',
                     'password' => null,
                     'is_owner' => true,
                     'status' => UserStatus::Invited,
@@ -156,6 +150,8 @@ final class TenantOwnerProvisioningService
                 ->where('id', '!=', $user->id)
                 ->where('is_owner', true)
                 ->update(['is_owner' => false]);
+
+            $this->settingService->seedDefaults((string) ($tenant->name ?? 'Store'));
         } finally {
             tenancy()->end();
         }
@@ -192,15 +188,11 @@ final class TenantOwnerProvisioningService
      *
      * Substitutes the tenant primary domain and plain token into the
      * configured setup URL template.
-     *
-     * @param Tenant $tenant
-     * @param string $plainToken
-     * @return string
      */
     public function setupPasswordUrl(Tenant $tenant, string $plainToken): string
     {
         $domain = $this->primaryDomain($tenant);
-        $template = (string)config('app.tenant_setup_password_url', 'http://{domain}/setup-password?token={token}');
+        $template = (string) config('app.tenant_setup_password_url', 'http://{domain}/setup-password?token={token}');
 
         return str_replace(
             ['{domain}', '{token}'],
@@ -213,9 +205,6 @@ final class TenantOwnerProvisioningService
      * Resolve the primary domain hostname for a tenant.
      *
      * Falls back to the first domain when no primary is explicitly set.
-     *
-     * @param Tenant $tenant
-     * @return string
      */
     public function primaryDomain(Tenant $tenant): string
     {
@@ -229,9 +218,6 @@ final class TenantOwnerProvisioningService
 
     /**
      * Mark the tenant owner invitation as accepted in tenant metadata.
-     *
-     * @param Tenant $tenant
-     * @return void
      */
     public function markInviteAccepted(Tenant $tenant): void
     {

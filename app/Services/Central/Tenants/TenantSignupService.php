@@ -8,6 +8,7 @@ use App\Models\Central\BillingAddress;
 use App\Models\Central\Plan;
 use App\Models\Central\Subscription;
 use App\Models\Central\Tenant;
+use App\Services\Central\Billing\BillingProfileService;
 use App\Services\Central\Billing\SubscriptionService;
 use App\Services\Central\World\WorldService;
 use Illuminate\Support\Facades\DB;
@@ -20,7 +21,7 @@ use Throwable;
  *
  * Creates the tenant with an active owner password, then attaches a TRIALING
  * subscription without charging. Price and gateway are resolved from billing
- * country → currency → PlanPrice → gateway settings.
+ * country → currency → PlanPrice → gateway catalog / preferred gateway.
  *
  * Tenant creation must NOT run inside a DB transaction: TenantCreated runs
  * CreateDatabase (DDL), which implicitly commits on MySQL.
@@ -28,12 +29,11 @@ use Throwable;
 final class TenantSignupService
 {
     public function __construct(
-        private readonly TenantService       $tenantService,
+        private readonly TenantService $tenantService,
         private readonly SubscriptionService $subscriptionService,
-        private readonly WorldService        $world,
-    )
-    {
-    }
+        private readonly BillingProfileService $billingProfileService,
+        private readonly WorldService $world,
+    ) {}
 
     /**
      * Sign up a new tenant on a publicly visible plan with a trial subscription.
@@ -49,6 +49,7 @@ final class TenantSignupService
      *     domain?: string|null,
      *     owner_name?: string|null,
      *     billing_interval?: string|null,
+     *     gateway?: string|null,
      *     billing_address?: array{
      *         name?: string|null,
      *         company?: string|null,
@@ -69,13 +70,13 @@ final class TenantSignupService
     {
         $plan = Plan::query()->findOrFail($data['plan_id']);
 
-        if (!$plan->isPubliclyVisible()) {
+        if (! $plan->isPubliclyVisible()) {
             throw ValidationException::withMessages([
                 'plan_id' => ['The selected plan is not available for self-serve signup.'],
             ]);
         }
 
-        $country = Str::upper(trim((string)$data['country']));
+        $country = Str::upper(trim((string) $data['country']));
         $worldCountry = $this->world->findCountryByIso2($country);
 
         if ($worldCountry === null) {
@@ -99,39 +100,57 @@ final class TenantSignupService
             ],
         ]);
 
-        return DB::transaction(function () use ($data, $plan, $country, $tenant): array {
-            $addressPayload = is_array($data['billing_address'] ?? null) ? $data['billing_address'] : [];
-            $billingAddress = BillingAddress::query()->create([
-                'tenant_id' => $tenant->id,
-                'name' => $addressPayload['name'] ?? ($data['owner_name'] ?? $data['name']),
-                'company' => $addressPayload['company'] ?? $data['name'],
-                'line1' => $addressPayload['line1'] ?? 'Address pending',
-                'line2' => $addressPayload['line2'] ?? null,
-                'city' => $addressPayload['city'] ?? 'Pending',
-                'state' => $addressPayload['state'] ?? null,
-                'postal_code' => $addressPayload['postal_code'] ?? '00000',
-                'country' => $country,
-                'tax_id' => $addressPayload['tax_id'] ?? null,
-                'tax_type' => $addressPayload['tax_type'] ?? null,
-                'is_default' => true,
-            ]);
+        try {
+            return DB::transaction(function () use ($data, $plan, $country, $tenant): array {
+                $addressPayload = is_array($data['billing_address'] ?? null) ? $data['billing_address'] : [];
+                $billingAddress = BillingAddress::query()->create([
+                    'tenant_id' => $tenant->id,
+                    'name' => $addressPayload['name'] ?? ($data['owner_name'] ?? $data['name']),
+                    'company' => $addressPayload['company'] ?? $data['name'],
+                    'line1' => $addressPayload['line1'] ?? 'Address pending',
+                    'line2' => $addressPayload['line2'] ?? null,
+                    'city' => $addressPayload['city'] ?? 'Pending',
+                    'state' => $addressPayload['state'] ?? null,
+                    'postal_code' => $addressPayload['postal_code'] ?? '00000',
+                    'country' => $country,
+                    'tax_id' => $addressPayload['tax_id'] ?? null,
+                    'tax_type' => $addressPayload['tax_type'] ?? null,
+                    'is_default' => true,
+                ]);
 
-            $subscription = $this->subscriptionService->create([
-                'tenant_id' => $tenant->id,
-                'plan_id' => $plan->id,
-                'country' => $country,
-                'billing_interval' => $data['billing_interval'] ?? null,
-                'billing_address_id' => $billingAddress->id,
-            ]);
+                $currency = $this->world->currencyForCountry($country);
+                $preferredGateway = filled($data['gateway'] ?? null)
+                    ? Str::lower(trim((string) $data['gateway']))
+                    : null;
 
-            if ($subscription->trial_ends_at !== null) {
-                $tenant->update(['trial_ends_at' => $subscription->trial_ends_at]);
-            }
+                $this->billingProfileService->update($tenant, [
+                    'country_iso2' => $country,
+                    'currency' => filled($currency) ? Str::upper((string) $currency) : null,
+                    'preferred_gateway' => $preferredGateway,
+                ]);
 
-            return [
-                'tenant' => $tenant->fresh(['domains'])->loadCount(['domains', 'notes']),
-                'subscription' => $subscription->load(['plan', 'planPrice', 'invoices']),
-            ];
-        });
+                $subscription = $this->subscriptionService->create([
+                    'tenant_id' => $tenant->id,
+                    'plan_id' => $plan->id,
+                    'country' => $country,
+                    'billing_interval' => $data['billing_interval'] ?? null,
+                    'billing_address_id' => $billingAddress->id,
+                    'gateway' => $preferredGateway,
+                ]);
+
+                if ($subscription->trial_ends_at !== null) {
+                    $tenant->update(['trial_ends_at' => $subscription->trial_ends_at]);
+                }
+
+                return [
+                    'tenant' => $tenant->fresh(['domains'])->loadCount(['domains', 'notes']),
+                    'subscription' => $subscription->load(['plan', 'planPrice', 'invoices']),
+                ];
+            });
+        } catch (Throwable $exception) {
+            $this->tenantService->delete($tenant);
+
+            throw $exception;
+        }
     }
 }

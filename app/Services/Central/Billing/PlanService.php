@@ -28,10 +28,8 @@ final class PlanService
 {
     public function __construct(
         private readonly PlanPriceResolver $priceResolver,
-        private readonly BillingSettings   $billingSettings,
-    )
-    {
-    }
+        private readonly BillingSettings $billingSettings,
+    ) {}
 
     /**
      * Aggregate counts for the plans index.
@@ -54,24 +52,24 @@ final class PlanService
             ->selectRaw('status, COUNT(*) as aggregate')
             ->groupBy('status')
             ->pluck('aggregate', 'status')
-            ->map(fn($count): int => (int)$count)
+            ->map(fn ($count): int => (int) $count)
             ->all();
 
         $byVisibility = Plan::query()
             ->selectRaw('visibility, COUNT(*) as aggregate')
             ->groupBy('visibility')
             ->pluck('aggregate', 'visibility')
-            ->map(fn($count): int => (int)$count)
+            ->map(fn ($count): int => (int) $count)
             ->all();
 
         return [
-            'total' => (int)array_sum($byStatus),
-            'draft' => (int)($byStatus[PlanStatus::Draft->value] ?? 0),
-            'active' => (int)($byStatus[PlanStatus::Active->value] ?? 0),
-            'inactive' => (int)($byStatus[PlanStatus::Inactive->value] ?? 0),
-            'archived' => (int)($byStatus[PlanStatus::Archived->value] ?? 0),
-            'public' => (int)($byVisibility[PlanVisibility::Public->value] ?? 0),
-            'featured' => (int)Plan::query()->where('is_featured', true)->count(),
+            'total' => (int) array_sum($byStatus),
+            'draft' => (int) ($byStatus[PlanStatus::Draft->value] ?? 0),
+            'active' => (int) ($byStatus[PlanStatus::Active->value] ?? 0),
+            'inactive' => (int) ($byStatus[PlanStatus::Inactive->value] ?? 0),
+            'archived' => (int) ($byStatus[PlanStatus::Archived->value] ?? 0),
+            'public' => (int) ($byVisibility[PlanVisibility::Public->value] ?? 0),
+            'featured' => (int) Plan::query()->where('is_featured', true)->count(),
             'by_status' => $byStatus,
             'by_visibility' => $byVisibility,
         ];
@@ -80,15 +78,15 @@ final class PlanService
     /**
      * Paginate publicly selectable plans for self-serve signup.
      *
-     * @param array{per_page?: int, country?: string, currency?: string, interval?: string} $filters
+     * @param  array{per_page?: int, country?: string, currency?: string, interval?: string}  $filters
      * @return LengthAwarePaginator<int, Plan>
      */
     public function paginatePublic(array $filters = []): LengthAwarePaginator
     {
-        $perPage = min((int)($filters['per_page'] ?? 15), 100);
+        $perPage = min((int) ($filters['per_page'] ?? 15), 100);
 
         $plans = Plan::query()
-            ->with(['prices' => fn($q) => $q->where('status', PlanStatus::Active)])
+            ->with(['prices' => fn ($q) => $q->where('status', PlanStatus::Active)])
             ->withCount('features')
             ->where('status', PlanStatus::Active)
             ->where('visibility', PlanVisibility::Public)
@@ -101,8 +99,8 @@ final class PlanService
                 try {
                     $resolved = $this->priceResolver->resolve(
                         $plan,
-                        isset($filters['country']) ? (string)$filters['country'] : null,
-                        isset($filters['currency']) ? (string)$filters['currency'] : null,
+                        isset($filters['country']) ? (string) $filters['country'] : null,
+                        isset($filters['currency']) ? (string) $filters['currency'] : null,
                         $filters['interval'] ?? null,
                     );
                     $plan->setAttribute('resolved_price', $resolved);
@@ -120,34 +118,34 @@ final class PlanService
     /**
      * Paginate plans with optional search and filter criteria.
      *
-     * @param array{search?: string, status?: string, visibility?: string, interval?: string, per_page?: int} $filters
+     * @param  array{search?: string, status?: string, visibility?: string, interval?: string, per_page?: int}  $filters
      * @return LengthAwarePaginator<int, Plan>
      */
     public function paginate(array $filters = []): LengthAwarePaginator
     {
-        $perPage = min((int)($filters['per_page'] ?? 15), 100);
+        $perPage = min((int) ($filters['per_page'] ?? 15), 100);
 
         return Plan::query()
             ->with(['prices'])
             ->withCount('features')
             ->when(
                 $filters['search'] ?? null,
-                fn($query, string $search) => $query->where(function ($q) use ($search): void {
+                fn ($query, string $search) => $query->where(function ($q) use ($search): void {
                     $q->where('name', 'like', "%{$search}%")
                         ->orWhere('slug', 'like', "%{$search}%");
                 })
             )
             ->when(
                 $filters['status'] ?? null,
-                fn($query, string $status) => $query->where('status', $status)
+                fn ($query, string $status) => $query->where('status', $status)
             )
             ->when(
                 $filters['visibility'] ?? null,
-                fn($query, string $visibility) => $query->where('visibility', $visibility)
+                fn ($query, string $visibility) => $query->where('visibility', $visibility)
             )
             ->when(
                 $filters['interval'] ?? null,
-                fn($query, string $interval) => $query->where('billing_interval', $interval)
+                fn ($query, string $interval) => $query->where('billing_interval', $interval)
             )
             ->orderBy('sort_order')
             ->orderBy('price')
@@ -157,13 +155,13 @@ final class PlanService
     /**
      * Build dropdown options for publicly selectable plans.
      *
-     * @param array{country?: string, currency?: string, interval?: string} $filters
+     * @param  array{country?: string, currency?: string, interval?: string}  $filters
      * @return list<array{value: int, label: string, currency?: string, amount?: string, billing_interval?: string}>
      */
     public function optionsForDropdown(array $filters = []): array
     {
         $plans = Plan::query()
-            ->with(['prices' => fn($q) => $q->where('status', PlanStatus::Active)])
+            ->with(['prices' => fn ($q) => $q->where('status', PlanStatus::Active)])
             ->where('status', PlanStatus::Active)
             ->where('visibility', PlanVisibility::Public)
             ->orderBy('sort_order')
@@ -178,8 +176,8 @@ final class PlanService
                     try {
                         $price = $this->priceResolver->resolve(
                             $plan,
-                            isset($filters['country']) ? (string)$filters['country'] : null,
-                            isset($filters['currency']) ? (string)$filters['currency'] : null,
+                            isset($filters['country']) ? (string) $filters['country'] : null,
+                            isset($filters['currency']) ? (string) $filters['currency'] : null,
                             $filters['interval'] ?? null,
                         );
                     } catch (ValidationException) {
@@ -204,8 +202,8 @@ final class PlanService
      */
     public function dropdownLabel(Plan $plan, ?PlanPrice $price = null): string
     {
-        $amount = number_format((float)($price?->amount ?? $plan->price), 2, '.', '');
-        $currency = (string)($price?->currency ?? $plan->currency);
+        $amount = number_format((float) ($price?->amount ?? $plan->price), 2, '.', '');
+        $currency = (string) ($price?->currency ?? $plan->currency);
         $interval = $price?->billing_interval ?? $plan->billing_interval;
         $suffix = match ($interval) {
             SubscriptionInterval::MONTHLY => 'mo',
@@ -223,8 +221,8 @@ final class PlanService
      * Generates a unique slug when none is provided and applies sensible
      * defaults for pricing, billing interval, and visibility.
      *
-     * @param array<string, mixed> $data
-     * @return Plan
+     * @param  array<string, mixed>  $data
+     *
      * @throws Throwable
      */
     public function create(array $data): Plan
@@ -233,7 +231,7 @@ final class PlanService
             $slug = $data['slug'] ?? Str::slug($data['name']);
             $features = $data['features'] ?? null;
             $prices = $data['prices'] ?? null;
-            unset($data['features'], $data['prices']);
+            unset($data['features'], $data['prices'], $data['price'], $data['currency']);
 
             $plan = Plan::query()->create([
                 'price' => 0,
@@ -248,20 +246,12 @@ final class PlanService
                 'slug' => $this->uniqueSlug($slug),
             ]);
 
-            if (!empty($features) && is_array($features)) {
+            if (! empty($features) && is_array($features)) {
                 $this->syncFeatures($plan, $features);
             }
 
             if (is_array($prices) && $prices !== []) {
                 $this->syncPrices($plan, $prices);
-            } elseif ((float)$plan->price > 0 || filled($plan->currency)) {
-                $this->upsertPrice($plan, [
-                    'amount' => $plan->price,
-                    'currency' => $plan->currency,
-                    'billing_interval' => $plan->billing_interval?->value ?? 'monthly',
-                    'trial_days' => $plan->trial_days,
-                    'status' => PlanStatus::Active->value,
-                ]);
             }
 
             $this->syncLegacyPricingFromPrimary($plan);
@@ -275,10 +265,6 @@ final class PlanService
      *
      * Appends an incrementing suffix when the base slug is already taken,
      * including soft-deleted records, optionally ignoring a plan ID during updates.
-     *
-     * @param string $slug
-     * @param int|null $ignoreId
-     * @return string
      */
     private function uniqueSlug(string $slug, ?int $ignoreId = null): string
     {
@@ -287,12 +273,12 @@ final class PlanService
         $i = 1;
 
         while (
-        Plan::withTrashed()
-            ->where('slug', $candidate)
-            ->when($ignoreId, fn($q) => $q->whereKeyNot($ignoreId))
-            ->exists()
+            Plan::withTrashed()
+                ->where('slug', $candidate)
+                ->when($ignoreId, fn ($q) => $q->whereKeyNot($ignoreId))
+                ->exists()
         ) {
-            $candidate = $base . '-' . $i;
+            $candidate = $base.'-'.$i;
             $i++;
         }
 
@@ -305,9 +291,7 @@ final class PlanService
      * Validates that each feature exists and maps limit configuration onto
      * the plan-feature pivot before replacing the full feature set.
      *
-     * @param Plan $plan
-     * @param list<array{feature_id: int, limit_type?: string, limit_value?: int|null, is_unlimited?: bool, is_enabled?: bool, tracks_usage?: bool, reset_period?: string|null, metadata?: array<string, mixed>}> $features
-     * @return Plan
+     * @param  list<array{feature_id: int, limit_type?: string, limit_value?: int|null, is_unlimited?: bool, is_enabled?: bool, tracks_usage?: bool, reset_period?: string|null, metadata?: array<string, mixed>}>  $features
      *
      * @throws ValidationException|Throwable
      */
@@ -317,16 +301,16 @@ final class PlanService
             $sync = [];
 
             foreach ($features as $item) {
-                $featureId = (int)$item['feature_id'];
+                $featureId = (int) $item['feature_id'];
 
-                if (!Feature::query()->whereKey($featureId)->exists()) {
+                if (! Feature::query()->whereKey($featureId)->exists()) {
                     throw ValidationException::withMessages([
                         'features' => ["Feature [{$featureId}] does not exist."],
                     ]);
                 }
 
                 $limitType = $item['limit_type'] ?? PlanFeatureLimitType::BOOLEAN->value;
-                $isUnlimited = (bool)($item['is_unlimited'] ?? $limitType === PlanFeatureLimitType::UNLIMITED->value);
+                $isUnlimited = (bool) ($item['is_unlimited'] ?? $limitType === PlanFeatureLimitType::UNLIMITED->value);
 
                 $sync[$featureId] = [
                     'limit_type' => $limitType,
@@ -348,7 +332,7 @@ final class PlanService
     /**
      * Replace all prices for a plan.
      *
-     * @param list<array{amount: float|int|string, currency: string, billing_interval?: string, trial_days?: int|null, status?: string, metadata?: array<string, mixed>|null}> $prices
+     * @param  list<array{amount: float|int|string, currency: string, billing_interval?: string, trial_days?: int|null, status?: string, metadata?: array<string, mixed>|null}>  $prices
      */
     public function syncPrices(Plan $plan, array $prices): Plan
     {
@@ -368,18 +352,19 @@ final class PlanService
     }
 
     /**
-     * @param array{amount: float|int|string, currency: string, billing_interval?: string, trial_days?: int|null, status?: string, metadata?: array<string, mixed>|null, id?: int} $data
+     * @param  array{amount: float|int|string, currency: string, billing_interval?: string, trial_days?: int|null, status?: string, metadata?: array<string, mixed>|null, gateway_identifiers?: array<string, mixed>|null, id?: int}  $data
      */
     public function upsertPrice(Plan $plan, array $data): PlanPrice
     {
-        $currency = Str::upper((string)$data['currency']);
-        $interval = (string)($data['billing_interval'] ?? SubscriptionInterval::MONTHLY->value);
+        $currency = Str::upper((string) $data['currency']);
+        $interval = (string) ($data['billing_interval'] ?? SubscriptionInterval::MONTHLY->value);
 
         $attributes = [
             'amount' => $data['amount'],
             'trial_days' => $data['trial_days'] ?? null,
             'status' => $data['status'] ?? PlanStatus::Active->value,
             'metadata' => $data['metadata'] ?? null,
+            'gateway_identifiers' => $data['gateway_identifiers'] ?? null,
         ];
 
         if (isset($data['id'])) {
@@ -408,9 +393,7 @@ final class PlanService
      * Ensures slug uniqueness when the slug changes and delegates feature
      * replacement to {@see syncFeatures()} when a features array is provided.
      *
-     * @param Plan $plan
-     * @param array<string, mixed> $data
-     * @return Plan
+     * @param  array<string, mixed>  $data
      *
      * @throws ValidationException|Throwable
      */
@@ -422,6 +405,7 @@ final class PlanService
             }
 
             $prices = $data['prices'] ?? null;
+            unset($data['price'], $data['currency']);
             $plan->update(collect($data)->except(['features', 'prices'])->all());
 
             if (array_key_exists('features', $data) && is_array($data['features'])) {
@@ -430,19 +414,6 @@ final class PlanService
 
             if (is_array($prices)) {
                 $this->syncPrices($plan, $prices);
-            } elseif (
-                array_key_exists('price', $data)
-                || array_key_exists('currency', $data)
-                || array_key_exists('billing_interval', $data)
-                || array_key_exists('trial_days', $data)
-            ) {
-                $this->upsertPrice($plan->fresh(), [
-                    'amount' => $plan->fresh()->price,
-                    'currency' => $plan->fresh()->currency,
-                    'billing_interval' => $plan->fresh()->billing_interval?->value ?? 'monthly',
-                    'trial_days' => $plan->fresh()->trial_days,
-                    'status' => PlanStatus::Active->value,
-                ]);
             }
 
             $this->syncLegacyPricingFromPrimary($plan->fresh());
@@ -458,7 +429,7 @@ final class PlanService
     {
         $primary = $plan->prices()
             ->where('status', PlanStatus::Active)
-            ->orderByRaw("CASE WHEN currency = ? THEN 0 ELSE 1 END", [(string)$plan->currency])
+            ->orderByRaw('CASE WHEN currency = ? THEN 0 ELSE 1 END', [(string) $plan->currency])
             ->orderBy('id')
             ->first()
             ?? $plan->prices()->orderBy('id')->first();
@@ -477,8 +448,6 @@ final class PlanService
 
     /**
      * Soft-delete the specified plan.
-     *
-     * @param Plan $plan
      */
     public function delete(Plan $plan): void
     {
@@ -488,14 +457,13 @@ final class PlanService
     /**
      * Soft-delete multiple plans by ID.
      *
-     * @param list<int> $ids
-     * @return int
+     * @param  list<int>  $ids
      */
     public function deleteMany(array $ids): int
     {
         $plans = Plan::query()->whereIn('id', $ids)->get();
 
-        $plans->each(fn(Plan $plan) => $this->delete($plan));
+        $plans->each(fn (Plan $plan) => $this->delete($plan));
 
         return $plans->count();
     }
@@ -503,8 +471,7 @@ final class PlanService
     /**
      * Activate multiple plans by ID.
      *
-     * @param list<int> $ids
-     * @return int
+     * @param  list<int>  $ids
      */
     public function activateMany(array $ids): int
     {
@@ -516,8 +483,7 @@ final class PlanService
     /**
      * Archive multiple plans by ID.
      *
-     * @param list<int> $ids
-     * @return int
+     * @param  list<int>  $ids
      */
     public function archiveMany(array $ids): int
     {
@@ -528,9 +494,6 @@ final class PlanService
 
     /**
      * Restore a soft-deleted plan.
-     *
-     * @param Plan $plan
-     * @return Plan
      */
     public function restore(Plan $plan): Plan
     {
@@ -541,9 +504,6 @@ final class PlanService
 
     /**
      * Activate the specified plan.
-     *
-     * @param Plan $plan
-     * @return Plan
      */
     public function activate(Plan $plan): Plan
     {
@@ -566,9 +526,6 @@ final class PlanService
 
     /**
      * Archive the specified plan.
-     *
-     * @param Plan $plan
-     * @return Plan
      */
     public function archive(Plan $plan): Plan
     {
@@ -583,15 +540,12 @@ final class PlanService
      * Applies feature defaults when limit configuration is omitted and
      * returns the hydrated plan-feature pivot record.
      *
-     * @param Plan $plan
-     * @param Feature $feature
-     * @param array<string, mixed> $data
-     * @return PlanFeature
+     * @param  array<string, mixed>  $data
      */
     public function assignFeature(Plan $plan, Feature $feature, array $data = []): PlanFeature
     {
         $limitType = $data['limit_type'] ?? $feature->default_limit_type?->value ?? PlanFeatureLimitType::BOOLEAN->value;
-        $isUnlimited = (bool)($data['is_unlimited'] ?? $limitType === PlanFeatureLimitType::UNLIMITED->value);
+        $isUnlimited = (bool) ($data['is_unlimited'] ?? $limitType === PlanFeatureLimitType::UNLIMITED->value);
 
         $plan->features()->syncWithoutDetaching([
             $feature->id => [
@@ -616,9 +570,6 @@ final class PlanService
 
     /**
      * Detach a feature from the specified plan.
-     *
-     * @param Plan $plan
-     * @param Feature $feature
      */
     public function detachFeature(Plan $plan, Feature $feature): void
     {

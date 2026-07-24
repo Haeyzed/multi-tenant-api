@@ -4,6 +4,7 @@ declare(strict_types=1);
 
 namespace App\Services\Central\Settings;
 
+use App\Services\Central\Billing\PaymentGatewayConfigService;
 use Illuminate\Support\Facades\Config;
 use Illuminate\Support\Facades\Mail;
 use Illuminate\Support\Facades\Schema;
@@ -20,9 +21,8 @@ final class ApplySettingsToConfig
 {
     public function __construct(
         private readonly SettingService $settings,
-    )
-    {
-    }
+        private readonly PaymentGatewayConfigService $gatewayConfigs,
+    ) {}
 
     public function __invoke(): void
     {
@@ -31,7 +31,7 @@ final class ApplySettingsToConfig
 
     public function apply(): void
     {
-        if (!$this->settingsTableReady()) {
+        if (! $this->settingsTableReady()) {
             return;
         }
 
@@ -56,7 +56,7 @@ final class ApplySettingsToConfig
     }
 
     /**
-     * @param array<string, mixed> $map
+     * @param  array<string, mixed>  $map
      */
     private function applyMail(array $map): void
     {
@@ -86,7 +86,7 @@ final class ApplySettingsToConfig
         }
 
         if (array_key_exists('mail.port', $map) && $map['mail.port'] !== null && $map['mail.port'] !== '') {
-            Config::set('mail.mailers.smtp.port', (int)$map['mail.port']);
+            Config::set('mail.mailers.smtp.port', (int) $map['mail.port']);
         }
 
         $username = $this->stringValue($map['mail.username'] ?? null);
@@ -121,11 +121,11 @@ final class ApplySettingsToConfig
             return $value ? '1' : '0';
         }
 
-        return (string)$value;
+        return (string) $value;
     }
 
     /**
-     * @param array<string, mixed> $map
+     * @param  array<string, mixed>  $map
      */
     private function applyStorage(array $map): void
     {
@@ -180,7 +180,7 @@ final class ApplySettingsToConfig
     }
 
     /**
-     * @param array<string, mixed> $map
+     * @param  array<string, mixed>  $map
      */
     private function applyPayments(array $map): void
     {
@@ -213,19 +213,20 @@ final class ApplySettingsToConfig
         $this->setPaymentCredential($map, 'billing.flutterwave_secret', 'payments.flutterwave.secret');
         $this->setPaymentCredential($map, 'billing.flutterwave_public', 'payments.flutterwave.public', encrypted: false);
         $this->setPaymentCredential($map, 'billing.flutterwave_webhook_secret', 'payments.flutterwave.webhook_secret');
+
+        $this->gatewayConfigs->applyActiveEnvironmentToConfig();
     }
 
     /**
-     * @param array<string, mixed> $map
+     * @param  array<string, mixed>  $map
      */
     private function setPaymentCredential(
-        array  $map,
+        array $map,
         string $settingKey,
         string $configKey,
-        bool   $encrypted = true,
-    ): void
-    {
-        if (!array_key_exists($settingKey, $map)) {
+        bool $encrypted = true,
+    ): void {
+        if (! array_key_exists($settingKey, $map)) {
             return;
         }
 

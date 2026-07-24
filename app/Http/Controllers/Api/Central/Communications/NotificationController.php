@@ -5,13 +5,16 @@ declare(strict_types=1);
 namespace App\Http\Controllers\Api\Central\Communications;
 
 use App\Http\Controllers\Controller;
+use App\Http\Requests\Central\Communications\ScheduleNotificationRequest;
+use App\Http\Requests\Central\Communications\StoreNotificationRequest;
+use App\Http\Requests\Central\Communications\UpdateNotificationRequest;
 use App\Http\Resources\Central\NotificationDeliveryResource;
 use App\Http\Resources\Central\PlatformNotificationResource;
 use App\Models\Central\NotificationDelivery;
 use App\Models\Central\PlatformNotification;
 use App\Services\Central\Communications\NotificationService;
-use Dedoc\Scramble\Attributes\Group;
 use Dedoc\Scramble\Attributes\Endpoint;
+use Dedoc\Scramble\Attributes\Group;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
 
@@ -20,14 +23,12 @@ final class NotificationController extends Controller
 {
     public function __construct(
         private readonly NotificationService $notificationService,
-    )
-    {
-    }
+    ) {}
 
     #[Endpoint(operationId: 'communications.notification.index', title: 'List notifications', description: 'Return a paginated list of notifications.')]
     public function index(Request $request): JsonResponse
     {
-        abort_unless($request->user()?->can('notifications.view'), 403);
+        $this->authorize('viewNotifications');
 
         $notifications = $this->notificationService->paginate($request->only(['search', 'status', 'per_page']));
 
@@ -38,72 +39,43 @@ final class NotificationController extends Controller
     }
 
     #[Endpoint(operationId: 'communications.notification.store', title: 'Create notification', description: 'Create a new notification and return it.')]
-    public function store(Request $request): JsonResponse
+    public function store(StoreNotificationRequest $request): JsonResponse
     {
-        abort_unless($request->user()?->can('notifications.create'), 403);
-
-        $data = $request->validate([
-            'title' => ['required', 'string', 'max:255'],
-            'body' => ['required', 'string'],
-            'channels' => ['sometimes', 'array', 'min:1'],
-            'channels.*' => ['string'],
-            'scheduled_at' => ['sometimes', 'nullable', 'date'],
-            'target_user_ids' => ['sometimes', 'nullable', 'array'],
-            'target_user_ids.*' => ['integer', 'exists:users,id'],
-            'metadata' => ['sometimes', 'array'],
-        ]);
-
-        $notification = $this->notificationService->create($data, $request->user());
+        $notification = $this->notificationService->create($request->validated(), $request->user());
 
         return $this->success(new PlatformNotificationResource($notification), 'Notification created successfully.', 201);
     }
 
     #[Endpoint(operationId: 'communications.notification.show', title: 'Show notification', description: 'Return a single notification by ID.')]
-    public function show(Request $request, PlatformNotification $notification): JsonResponse
+    public function show(PlatformNotification $notification): JsonResponse
     {
-        abort_unless($request->user()?->can('notifications.view'), 403);
+        $this->authorize('viewNotifications');
         $notification->loadCount('deliveries')->load('creator');
 
         return $this->success(new PlatformNotificationResource($notification), 'Notification retrieved successfully.');
     }
 
     #[Endpoint(operationId: 'communications.notification.update', title: 'Update notification', description: 'Update an existing notification and return it.')]
-    public function update(Request $request, PlatformNotification $notification): JsonResponse
+    public function update(UpdateNotificationRequest $request, PlatformNotification $notification): JsonResponse
     {
-        abort_unless($request->user()?->can('notifications.update'), 403);
-
-        $data = $request->validate([
-            'title' => ['sometimes', 'string', 'max:255'],
-            'body' => ['sometimes', 'string'],
-            'channels' => ['sometimes', 'array', 'min:1'],
-            'channels.*' => ['string'],
-            'scheduled_at' => ['sometimes', 'nullable', 'date'],
-            'target_user_ids' => ['sometimes', 'nullable', 'array'],
-            'metadata' => ['sometimes', 'array'],
-        ]);
-
-        $notification = $this->notificationService->update($notification, $data);
+        $notification = $this->notificationService->update($notification, $request->validated());
 
         return $this->success(new PlatformNotificationResource($notification), 'Notification updated successfully.');
     }
 
     #[Endpoint(operationId: 'communications.notification.destroy', title: 'Delete notification', description: 'Soft-delete or permanently remove a notification.')]
-    public function destroy(Request $request, PlatformNotification $notification): JsonResponse
+    public function destroy(PlatformNotification $notification): JsonResponse
     {
-        abort_unless($request->user()?->can('notifications.delete'), 403);
+        $this->authorize('deleteNotifications');
         $this->notificationService->delete($notification);
 
         return $this->success(null, 'Notification deleted successfully.');
     }
 
     #[Endpoint(operationId: 'communications.notification.schedule', title: 'Schedule', description: 'Schedule the resource for a future time.')]
-    public function schedule(Request $request, PlatformNotification $notification): JsonResponse
+    public function schedule(ScheduleNotificationRequest $request, PlatformNotification $notification): JsonResponse
     {
-        abort_unless($request->user()?->can('notifications.update'), 403);
-
-        $data = $request->validate([
-            'scheduled_at' => ['required', 'date', 'after:now'],
-        ]);
+        $data = $request->validated();
 
         $notification = $this->notificationService->schedule($notification, $data['scheduled_at']);
 
@@ -113,7 +85,7 @@ final class NotificationController extends Controller
     #[Endpoint(operationId: 'communications.notification.broadcast', title: 'Broadcast notification', description: 'Deliver the notification to target users/channels.')]
     public function broadcast(Request $request, PlatformNotification $notification): JsonResponse
     {
-        abort_unless($request->user()?->can('notifications.broadcast'), 403);
+        $this->authorize('broadcastNotifications');
 
         $notification = $this->notificationService->broadcast($notification);
 
@@ -123,7 +95,7 @@ final class NotificationController extends Controller
     #[Endpoint(operationId: 'communications.notification.cancel', title: 'Cancel notification', description: 'Cancel a scheduled, draft, or active notification.')]
     public function cancel(Request $request, PlatformNotification $notification): JsonResponse
     {
-        abort_unless($request->user()?->can('notifications.update'), 403);
+        $this->authorize('updateNotifications');
 
         $notification = $this->notificationService->cancel($notification);
 
@@ -133,9 +105,9 @@ final class NotificationController extends Controller
     #[Endpoint(operationId: 'communications.notification.history', title: 'notification history', description: 'Paginate history events for this notification.')]
     public function history(Request $request, PlatformNotification $notification): JsonResponse
     {
-        abort_unless($request->user()?->can('notifications.view'), 403);
+        $this->authorize('viewNotifications');
 
-        $history = $this->notificationService->history($notification, (int)$request->integer('per_page', 25));
+        $history = $this->notificationService->history($notification, (int) $request->integer('per_page', 25));
 
         return $this->paginated(
             NotificationDeliveryResource::collection($history),
@@ -146,7 +118,7 @@ final class NotificationController extends Controller
     #[Endpoint(operationId: 'communications.notification.inbox', title: 'Notification inbox', description: 'List in-app notification deliveries for the current user.')]
     public function inbox(Request $request): JsonResponse
     {
-        abort_unless($request->user()?->can('notifications.inbox'), 403);
+        $this->authorize('inboxNotifications');
 
         $inbox = $this->notificationService->inbox($request->user(), $request->only(['status', 'unread', 'per_page']));
 
@@ -159,7 +131,7 @@ final class NotificationController extends Controller
     #[Endpoint(operationId: 'communications.notification.markRead', title: 'Mark as read', description: 'Mark a notification delivery as read.')]
     public function markRead(Request $request, NotificationDelivery $delivery): JsonResponse
     {
-        abort_unless($request->user()?->can('notifications.inbox'), 403);
+        $this->authorize('inboxNotifications');
         abort_unless($delivery->user_id === $request->user()->id, 403);
 
         $delivery = $this->notificationService->markRead($delivery);
@@ -170,7 +142,7 @@ final class NotificationController extends Controller
     #[Endpoint(operationId: 'communications.notification.markUnread', title: 'Mark as unread', description: 'Mark a notification delivery as unread.')]
     public function markUnread(Request $request, NotificationDelivery $delivery): JsonResponse
     {
-        abort_unless($request->user()?->can('notifications.inbox'), 403);
+        $this->authorize('inboxNotifications');
         abort_unless($delivery->user_id === $request->user()->id, 403);
 
         $delivery = $this->notificationService->markUnread($delivery);
@@ -178,4 +150,3 @@ final class NotificationController extends Controller
         return $this->success(new NotificationDeliveryResource($delivery), 'Notification marked as unread.');
     }
 }
-

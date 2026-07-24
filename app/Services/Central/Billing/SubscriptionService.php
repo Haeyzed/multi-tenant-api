@@ -28,29 +28,27 @@ use Throwable;
 final class SubscriptionService
 {
     public function __construct(
-        private readonly InvoiceService         $invoiceService,
+        private readonly InvoiceService $invoiceService,
         private readonly PaymentGatewayResolver $gatewayResolver,
-        private readonly PlanPriceResolver      $priceResolver,
-    )
-    {
-    }
+        private readonly PlanPriceResolver $priceResolver,
+    ) {}
 
     /**
      * Paginate subscriptions with optional tenant, status, plan, gateway, date range, and search filters.
      *
-     * @param array{tenant_id?: string, status?: string, plan_id?: int, gateway?: string, search?: string, start_date?: string, end_date?: string, per_page?: int} $filters
+     * @param  array{tenant_id?: string, status?: string, plan_id?: int, gateway?: string, search?: string, start_date?: string, end_date?: string, per_page?: int}  $filters
      * @return LengthAwarePaginator<int, Subscription>
      */
     public function paginate(array $filters = []): LengthAwarePaginator
     {
-        $perPage = min((int)($filters['per_page'] ?? 15), 100);
+        $perPage = min((int) ($filters['per_page'] ?? 15), 100);
 
         return Subscription::query()
             ->with(['tenant', 'plan', 'planPrice'])
-            ->when($filters['tenant_id'] ?? null, fn($q, $id) => $q->where('tenant_id', $id))
-            ->when($filters['status'] ?? null, fn($q, $status) => $q->where('status', $status))
-            ->when($filters['plan_id'] ?? null, fn($q, $planId) => $q->where('plan_id', $planId))
-            ->when($filters['gateway'] ?? null, fn($q, $gateway) => $q->where('gateway', $gateway))
+            ->when($filters['tenant_id'] ?? null, fn ($q, $id) => $q->where('tenant_id', $id))
+            ->when($filters['status'] ?? null, fn ($q, $status) => $q->where('status', $status))
+            ->when($filters['plan_id'] ?? null, fn ($q, $planId) => $q->where('plan_id', $planId))
+            ->when($filters['gateway'] ?? null, fn ($q, $gateway) => $q->where('gateway', $gateway))
             ->when($filters['start_date'] ?? null, function ($q, $date) {
                 $q->where('created_at', '>=', Carbon::parse($date)->startOfDay());
             })
@@ -59,7 +57,7 @@ final class SubscriptionService
             })
             ->when(
                 $filters['search'] ?? null,
-                fn($query, string $search) => $query->where(function ($q) use ($search): void {
+                fn ($query, string $search) => $query->where(function ($q) use ($search): void {
                     $q->where('gateway_subscription_id', 'like', "%{$search}%")
                         ->orWhere('currency', 'like', "%{$search}%")
                         ->orWhere('id', 'like', "%{$search}%")
@@ -85,19 +83,19 @@ final class SubscriptionService
     {
         return Subscription::query()
             ->with('plan:id,name')
-            ->when(filled($tenantId), fn($query) => $query->where('tenant_id', $tenantId))
+            ->when(filled($tenantId), fn ($query) => $query->where('tenant_id', $tenantId))
             ->when(
                 filled($search),
-                fn($query) => $query->where(function ($nested) use ($search): void {
+                fn ($query) => $query->where(function ($nested) use ($search): void {
                     $nested->where('id', 'like', "%{$search}%")
-                        ->orWhereHas('plan', fn($planQuery) => $planQuery->where('name', 'like', "%{$search}%"));
+                        ->orWhereHas('plan', fn ($planQuery) => $planQuery->where('name', 'like', "%{$search}%"));
                 }),
             )
             ->latest()
             ->get()
-            ->map(fn(Subscription $subscription): array => [
-                'value' => (string)$subscription->getKey(),
-                'label' => "#{$subscription->getKey()} — " . ($subscription->plan?->name ?? 'Subscription'),
+            ->map(fn (Subscription $subscription): array => [
+                'value' => (string) $subscription->getKey(),
+                'label' => "#{$subscription->getKey()} — ".($subscription->plan?->name ?? 'Subscription'),
             ])
             ->values()
             ->all();
@@ -121,23 +119,23 @@ final class SubscriptionService
             ->selectRaw('status, COUNT(*) as aggregate')
             ->groupBy('status')
             ->pluck('aggregate', 'status')
-            ->map(fn($count): int => (int)$count)
+            ->map(fn ($count): int => (int) $count)
             ->all();
 
         $byGateway = Subscription::query()
             ->selectRaw('gateway, COUNT(*) as aggregate')
             ->groupBy('gateway')
             ->pluck('aggregate', 'gateway')
-            ->map(fn($count): int => (int)$count)
+            ->map(fn ($count): int => (int) $count)
             ->all();
 
         return [
-            'total' => (int)array_sum($byStatus),
-            'active' => (int)($byStatus[SubscriptionStatus::ACTIVE->value] ?? 0),
-            'trialing' => (int)($byStatus[SubscriptionStatus::TRIALING->value] ?? 0),
-            'past_due' => (int)($byStatus[SubscriptionStatus::PAST_DUE->value] ?? 0),
-            'cancelled' => (int)($byStatus[SubscriptionStatus::CANCELLED->value] ?? 0),
-            'paused' => (int)($byStatus[SubscriptionStatus::PAUSED->value] ?? 0),
+            'total' => (int) array_sum($byStatus),
+            'active' => (int) ($byStatus[SubscriptionStatus::ACTIVE->value] ?? 0),
+            'trialing' => (int) ($byStatus[SubscriptionStatus::TRIALING->value] ?? 0),
+            'past_due' => (int) ($byStatus[SubscriptionStatus::PAST_DUE->value] ?? 0),
+            'cancelled' => (int) ($byStatus[SubscriptionStatus::CANCELLED->value] ?? 0),
+            'paused' => (int) ($byStatus[SubscriptionStatus::PAUSED->value] ?? 0),
             'by_status' => $byStatus,
             'by_gateway' => $byGateway,
         ];
@@ -159,8 +157,6 @@ final class SubscriptionService
      *     tax_rate?: float,
      *     idempotency_key?: string|null
      * } $data
-     * @param User|null $actor
-     * @return Subscription
      *
      * @throws ValidationException|Throwable
      */
@@ -169,6 +165,7 @@ final class SubscriptionService
         return DB::transaction(function () use ($data, $actor): Subscription {
             $tenant = Tenant::query()->lockForUpdate()->findOrFail($data['tenant_id']);
             $plan = Plan::query()->lockForUpdate()->findOrFail($data['plan_id']);
+            $billingProfile = $tenant->billingProfile;
 
             if ($plan->status !== PlanStatus::Active) {
                 throw ValidationException::withMessages([
@@ -177,7 +174,7 @@ final class SubscriptionService
             }
 
             if (filled($data['idempotency_key'] ?? null)) {
-                $requestHash = hash('sha256', trim((string)$data['idempotency_key']));
+                $requestHash = hash('sha256', trim((string) $data['idempotency_key']));
                 $existingInvoice = $tenant->invoices()
                     ->where('idempotency_key', 'like', "%:request:{$requestHash}")
                     ->first();
@@ -207,7 +204,7 @@ final class SubscriptionService
 
             $planPrice = null;
 
-            if (!empty($data['plan_price_id'])) {
+            if (! empty($data['plan_price_id'])) {
                 $planPrice = $plan->prices()
                     ->whereKey($data['plan_price_id'])
                     ->where('status', PlanStatus::Active)
@@ -222,19 +219,20 @@ final class SubscriptionService
             } else {
                 $planPrice = $this->priceResolver->resolve(
                     $plan,
-                    isset($data['country']) ? (string)$data['country'] : null,
-                    isset($data['currency']) ? (string)$data['currency'] : null,
+                    isset($data['country']) ? (string) $data['country'] : $billingProfile?->country_iso2,
+                    isset($data['currency']) ? (string) $data['currency'] : null,
                     $data['billing_interval'] ?? null,
+                    $billingProfile,
                 );
             }
 
-            if (!empty($data['billing_address_id'])) {
+            if (! empty($data['billing_address_id'])) {
                 $addressExists = BillingAddress::query()
                     ->whereKey($data['billing_address_id'])
                     ->where('tenant_id', $tenant->id)
                     ->exists();
 
-                if (!$addressExists) {
+                if (! $addressExists) {
                     throw ValidationException::withMessages([
                         'billing_address_id' => ['The selected billing address does not belong to this tenant.'],
                     ]);
@@ -256,9 +254,11 @@ final class SubscriptionService
                 'currency' => $planPrice->currency,
                 'gateway' => $this->gatewayResolver->resolve(
                     $planPrice->currency,
-                    isset($data['gateway']) ? (string)$data['gateway'] : null,
+                    isset($data['gateway']) ? (string) $data['gateway'] : null,
+                    $billingProfile?->country_iso2,
+                    $billingProfile?->preferred_gateway,
                 ),
-                'trial_ends_at' => $trialDays > 0 ? now()->addDays((int)$trialDays) : null,
+                'trial_ends_at' => $trialDays > 0 ? now()->addDays((int) $trialDays) : null,
                 'starts_at' => $starts,
                 'current_period_start' => $starts,
                 'current_period_end' => $periodEnd,
@@ -284,16 +284,12 @@ final class SubscriptionService
 
     /**
      * Advance a start date by the subscription billing interval.
-     *
-     * @param Carbon $start
-     * @param SubscriptionInterval|string|null $interval
-     * @return Carbon
      */
     private function addInterval(Carbon $start, SubscriptionInterval|string|null $interval): Carbon
     {
         $interval = $interval instanceof SubscriptionInterval
             ? $interval
-            : SubscriptionInterval::tryFrom((string)$interval) ?? SubscriptionInterval::MONTHLY;
+            : SubscriptionInterval::tryFrom((string) $interval) ?? SubscriptionInterval::MONTHLY;
 
         return match ($interval) {
             SubscriptionInterval::MONTHLY => $start->copy()->addMonth(),
@@ -305,25 +301,16 @@ final class SubscriptionService
 
     /**
      * Persist a subscription lifecycle history entry.
-     *
-     * @param Subscription $subscription
-     * @param string $event
-     * @param SubscriptionStatus|null $from
-     * @param SubscriptionStatus|null $to
-     * @param int|null $fromPlanId
-     * @param int|null $toPlanId
-     * @param User|null $actor
      */
     private function recordHistory(
-        Subscription        $subscription,
-        string              $event,
+        Subscription $subscription,
+        string $event,
         ?SubscriptionStatus $from,
         ?SubscriptionStatus $to,
-        ?int                $fromPlanId,
-        ?int                $toPlanId,
-        ?User               $actor,
-    ): void
-    {
+        ?int $fromPlanId,
+        ?int $toPlanId,
+        ?User $actor,
+    ): void {
         $subscription->histories()->create([
             'event' => $event,
             'from_status' => $from?->value,
@@ -336,12 +323,11 @@ final class SubscriptionService
 
     private function invoiceIdempotencyKey(
         Subscription $subscription,
-        string       $event,
-        ?string      $clientKey,
-    ): string
-    {
+        string $event,
+        ?string $clientKey,
+    ): string {
         if (filled($clientKey)) {
-            return "subscription:{$subscription->id}:request:" . hash('sha256', trim($clientKey));
+            return "subscription:{$subscription->id}:request:".hash('sha256', trim($clientKey));
         }
 
         return "subscription:{$subscription->id}:{$event}";
@@ -353,18 +339,14 @@ final class SubscriptionService
      * Extends the current period, clears grace and expiration markers, records
      * renewal history, and generates a new invoice.
      *
-     * @param Subscription $subscription
-     * @param User|null $actor
-     * @return Subscription
      *
      * @throws ValidationException
      */
     public function renew(
         Subscription $subscription,
-        ?User        $actor = null,
-        ?string      $idempotencyKey = null,
-    ): Subscription
-    {
+        ?User $actor = null,
+        ?string $idempotencyKey = null,
+    ): Subscription {
         return DB::transaction(function () use ($subscription, $actor, $idempotencyKey): Subscription {
             $subscription = Subscription::query()->lockForUpdate()->findOrFail($subscription->id);
 
@@ -377,7 +359,7 @@ final class SubscriptionService
                 return $subscription->load(['tenant', 'plan', 'invoices']);
             }
 
-            if (!in_array($subscription->status, [SubscriptionStatus::ACTIVE, SubscriptionStatus::PAST_DUE, SubscriptionStatus::TRIALING], true)) {
+            if (! in_array($subscription->status, [SubscriptionStatus::ACTIVE, SubscriptionStatus::PAST_DUE, SubscriptionStatus::TRIALING], true)) {
                 throw ValidationException::withMessages([
                     'subscription' => ['Only active, past due, or trialing subscriptions can be renewed.'],
                 ]);
@@ -401,7 +383,7 @@ final class SubscriptionService
             $this->invoiceService->createForSubscription($subscription->fresh(), [
                 'idempotency_key' => $this->invoiceIdempotencyKey(
                     $subscription,
-                    'renewal:' . $start->utc()->format('YmdHis'),
+                    'renewal:'.$start->utc()->format('YmdHis'),
                     $idempotencyKey,
                 ),
             ]);
@@ -413,7 +395,7 @@ final class SubscriptionService
     /**
      * Upgrade a subscription to a higher-tier plan.
      *
-     * @param array{country?: string|null, currency?: string|null, billing_interval?: string|null, plan_price_id?: int|null, idempotency_key?: string|null} $options
+     * @param  array{country?: string|null, currency?: string|null, billing_interval?: string|null, plan_price_id?: int|null, idempotency_key?: string|null}  $options
      */
     public function upgrade(Subscription $subscription, Plan $plan, ?User $actor = null, array $options = []): Subscription
     {
@@ -423,19 +405,19 @@ final class SubscriptionService
     /**
      * Change a subscription to a different plan.
      *
-     * @param array{country?: string|null, currency?: string|null, billing_interval?: string|null, plan_price_id?: int|null, idempotency_key?: string|null} $options
+     * @param  array{country?: string|null, currency?: string|null, billing_interval?: string|null, plan_price_id?: int|null, idempotency_key?: string|null}  $options
      */
     private function changePlan(
         Subscription $subscription,
-        Plan         $plan,
-        string       $event,
-        ?User        $actor,
-        array        $options = [],
-    ): Subscription
-    {
+        Plan $plan,
+        string $event,
+        ?User $actor,
+        array $options = [],
+    ): Subscription {
         return DB::transaction(function () use ($subscription, $plan, $event, $actor, $options): Subscription {
             $subscription = Subscription::query()->lockForUpdate()->findOrFail($subscription->id);
             $plan = Plan::query()->lockForUpdate()->findOrFail($plan->id);
+            $billingProfile = $subscription->tenant?->billingProfile;
 
             if (
                 filled($options['idempotency_key'] ?? null)
@@ -455,7 +437,7 @@ final class SubscriptionService
                 ]);
             }
 
-            if (!$subscription->status->isActive() && $subscription->status !== SubscriptionStatus::PAUSED) {
+            if (! $subscription->status->isActive() && $subscription->status !== SubscriptionStatus::PAUSED) {
                 throw ValidationException::withMessages([
                     'subscription' => ['Subscription cannot change plans in its current status.'],
                 ]);
@@ -467,7 +449,7 @@ final class SubscriptionService
                 ]);
             }
 
-            if (!empty($options['plan_price_id'])) {
+            if (! empty($options['plan_price_id'])) {
                 $planPrice = $plan->prices()
                     ->whereKey($options['plan_price_id'])
                     ->where('status', PlanStatus::Active)
@@ -482,11 +464,12 @@ final class SubscriptionService
             } else {
                 $planPrice = $this->priceResolver->resolve(
                     $plan,
-                    isset($options['country']) ? (string)$options['country'] : null,
+                    isset($options['country']) ? (string) $options['country'] : $billingProfile?->country_iso2,
                     isset($options['currency'])
-                        ? (string)$options['currency']
-                        : (string)$subscription->currency,
+                        ? (string) $options['currency']
+                        : (string) $subscription->currency,
                     $options['billing_interval'] ?? $subscription->billing_interval,
+                    $billingProfile,
                 );
             }
 
@@ -499,16 +482,21 @@ final class SubscriptionService
                 'price' => $planPrice->amount,
                 'currency' => $planPrice->currency,
                 'billing_interval' => $planPrice->billing_interval,
-                'gateway' => $this->gatewayResolver->resolve($planPrice->currency),
+                'gateway' => $this->gatewayResolver->resolve(
+                    $planPrice->currency,
+                    null,
+                    $billingProfile?->country_iso2,
+                    $billingProfile?->preferred_gateway,
+                ),
                 'status' => SubscriptionStatus::ACTIVE,
             ]);
 
             $this->recordHistory($subscription, $event, $fromStatus, SubscriptionStatus::ACTIVE, $fromPlan, $plan->id, $actor);
             $this->invoiceService->createForSubscription($subscription->fresh(), [
-                'description' => ucfirst($event) . ' to ' . $plan->name,
+                'description' => ucfirst($event).' to '.$plan->name,
                 'idempotency_key' => $this->invoiceIdempotencyKey(
                     $subscription,
-                    "{$event}:{$fromPlan}:{$plan->id}:" . ($subscription->current_period_start?->utc()->format('YmdHis') ?? 'none'),
+                    "{$event}:{$fromPlan}:{$plan->id}:".($subscription->current_period_start?->utc()->format('YmdHis') ?? 'none'),
                     $options['idempotency_key'] ?? null,
                 ),
             ]);
@@ -520,7 +508,7 @@ final class SubscriptionService
     /**
      * Downgrade a subscription to a lower-tier plan.
      *
-     * @param array{country?: string|null, currency?: string|null, billing_interval?: string|null, plan_price_id?: int|null, idempotency_key?: string|null} $options
+     * @param  array{country?: string|null, currency?: string|null, billing_interval?: string|null, plan_price_id?: int|null, idempotency_key?: string|null}  $options
      */
     public function downgrade(Subscription $subscription, Plan $plan, ?User $actor = null, array $options = []): Subscription
     {
@@ -530,9 +518,6 @@ final class SubscriptionService
     /**
      * Pause an active subscription.
      *
-     * @param Subscription $subscription
-     * @param User|null $actor
-     * @return Subscription
      *
      * @throws ValidationException
      */
@@ -558,9 +543,6 @@ final class SubscriptionService
     /**
      * Resume a paused subscription.
      *
-     * @param Subscription $subscription
-     * @param User|null $actor
-     * @return Subscription
      *
      * @throws ValidationException
      */
@@ -586,11 +568,6 @@ final class SubscriptionService
     /**
      * Cancel a subscription immediately or at period end.
      *
-     * @param Subscription $subscription
-     * @param bool $immediately
-     * @param string|null $reason
-     * @param User|null $actor
-     * @return Subscription
      *
      * @throws ValidationException
      */
@@ -627,10 +604,6 @@ final class SubscriptionService
 
     /**
      * Expire a subscription and clear grace-period markers.
-     *
-     * @param Subscription $subscription
-     * @param User|null $actor
-     * @return Subscription
      */
     public function expire(Subscription $subscription, ?User $actor = null): Subscription
     {
@@ -649,11 +622,6 @@ final class SubscriptionService
 
     /**
      * Mark a subscription as past due and start a grace period.
-     *
-     * @param Subscription $subscription
-     * @param int $graceDays
-     * @param User|null $actor
-     * @return Subscription
      */
     public function markPastDue(Subscription $subscription, int $graceDays = 3, ?User $actor = null): Subscription
     {

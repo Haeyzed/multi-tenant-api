@@ -3,12 +3,16 @@
 declare(strict_types=1);
 
 use App\Enums\Central\PaymentStatus;
+use App\Events\Central\Billing\PaymentCompleted;
 use App\Models\Central\Invoice;
 use App\Models\Central\Payment;
 use App\Models\Central\Tenant;
+use Illuminate\Support\Facades\Event;
 use Illuminate\Support\Facades\Http;
 
 it('completes a paystack payment from a signed webhook', function (): void {
+    Event::fake([PaymentCompleted::class]);
+
     config([
         'payments.mode' => 'live',
         'payments.paystack.secret' => 'sk_test_paystack',
@@ -66,4 +70,6 @@ it('completes a paystack payment from a signed webhook', function (): void {
 
     expect($payment->fresh()->status)->toBe(PaymentStatus::COMPLETED)
         ->and((float) $invoice->fresh()->amount_paid)->toBe(25.0);
+
+    Event::assertDispatched(PaymentCompleted::class);
 });

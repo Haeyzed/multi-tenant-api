@@ -25,6 +25,7 @@ use Stancl\Tenancy\Database\Concerns\CentralConnection;
  * @property int|null $trial_days
  * @property PlanStatus $status
  * @property array<string, mixed>|null $metadata
+ * @property array<string, mixed>|null $gateway_identifiers
  * @property Carbon|null $created_at
  * @property Carbon|null $updated_at
  * @property-read Plan $plan
@@ -35,6 +36,7 @@ class PlanPrice extends Model
 {
     /** @use HasFactory<PlanPriceFactory> */
     use CentralConnection;
+
     use HasFactory;
 
     /**
@@ -48,6 +50,7 @@ class PlanPrice extends Model
         'trial_days',
         'status',
         'metadata',
+        'gateway_identifiers',
     ];
 
     protected static function newFactory(): PlanPriceFactory
@@ -91,6 +94,7 @@ class PlanPrice extends Model
             'trial_days' => 'integer',
             'status' => PlanStatus::class,
             'metadata' => 'array',
+            'gateway_identifiers' => 'array',
         ];
     }
 }

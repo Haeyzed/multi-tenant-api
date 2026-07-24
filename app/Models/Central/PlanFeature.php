@@ -10,6 +10,7 @@ use Illuminate\Database\Eloquent\Builder;
 use Illuminate\Database\Eloquent\Relations\BelongsTo;
 use Illuminate\Database\Eloquent\Relations\Pivot;
 use Illuminate\Support\Carbon;
+use Stancl\Tenancy\Database\Concerns\CentralConnection;
 
 /**
  * Pivot linking a plan to a feature with limit configuration.
@@ -33,6 +34,8 @@ use Illuminate\Support\Carbon;
  */
 class PlanFeature extends Pivot
 {
+    use CentralConnection;
+
     public $incrementing = true;
 
     protected $table = 'plan_feature';

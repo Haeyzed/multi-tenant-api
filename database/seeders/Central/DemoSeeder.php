@@ -40,6 +40,7 @@ use App\Models\Central\ApiClient;
 use App\Models\Central\Backup;
 use App\Models\Central\BackupSchedule;
 use App\Models\Central\BillingAddress;
+use App\Models\Central\BillingProfile;
 use App\Models\Central\Domain;
 use App\Models\Central\Feature;
 use App\Models\Central\FeatureCategory;
@@ -54,6 +55,7 @@ use App\Models\Central\PlanPrice;
 use App\Models\Central\PlatformNotification;
 use App\Models\Central\PlatformVersion;
 use App\Models\Central\Subscription;
+use App\Models\Central\SubscriptionHistory;
 use App\Models\Central\Tenant;
 use App\Models\Central\TenantNote;
 use App\Models\Central\Theme;
@@ -82,6 +84,7 @@ class DemoSeeder extends Seeder
         $this->call([
             RbacSeeder::class,
             SettingSeeder::class,
+            PaymentGatewaySeeder::class,
         ]);
 
         $admin = $this->seedUsers();
@@ -233,6 +236,22 @@ class DemoSeeder extends Seeder
                 'sort_order' => 3,
             ],
         );
+        $brands = Feature::query()->updateOrCreate(
+            ['key' => 'brands'],
+            [
+                'feature_category_id' => $commerce->id,
+                'name' => 'Brands',
+                'slug' => 'brands',
+                'description' => 'Product brand catalog limit',
+                'status' => FeatureStatus::Active,
+                'default_limit_type' => PlanFeatureLimitType::COUNT,
+                'default_limit_value' => 5,
+                'unit' => 'brands',
+                'is_available' => true,
+                'tracks_usage' => true,
+                'sort_order' => 4,
+            ],
+        );
 
         // Multi-currency catalog: one plan, many PlanPrice rows (NGN local + USD international).
         $starter = Plan::query()->updateOrCreate(
@@ -325,6 +344,13 @@ class DemoSeeder extends Seeder
                     'is_enabled' => $index > 0,
                     'tracks_usage' => false,
                 ],
+                $brands->id => [
+                    'limit_type' => PlanFeatureLimitType::COUNT->value,
+                    'limit_value' => [5, 25, null][$index],
+                    'is_unlimited' => $index === 2,
+                    'is_enabled' => true,
+                    'tracks_usage' => true,
+                ],
             ]);
         }
 
@@ -354,6 +380,7 @@ class DemoSeeder extends Seeder
 
     /**
      * @return list<Tenant>
+     *
      * @throws RandomException
      */
     private function seedTenantsAndBilling(Plan $starter, Plan $growth, Plan $scale, User $admin): array
@@ -460,6 +487,22 @@ class DemoSeeder extends Seeder
                 ],
             );
 
+            BillingProfile::query()->updateOrCreate(
+                ['tenant_id' => $tenant->id],
+                [
+                    'country_iso2' => $country,
+                    'currency' => $currency,
+                    'preferred_gateway' => $gateway->value,
+                    'metadata' => ['seeded' => true],
+                ],
+            );
+
+            $subscriptionStatus = match ($status) {
+                TenantStatus::TRIAL => SubscriptionStatus::TRIALING,
+                TenantStatus::SUSPENDED => SubscriptionStatus::PAST_DUE,
+                default => SubscriptionStatus::ACTIVE,
+            };
+
             $subscription = Subscription::query()->updateOrCreate(
                 [
                     'tenant_id' => $tenant->id,
@@ -467,11 +510,7 @@ class DemoSeeder extends Seeder
                 ],
                 [
                     'plan_price_id' => $planPrice?->id,
-                    'status' => match ($status) {
-                        TenantStatus::TRIAL => SubscriptionStatus::TRIALING,
-                        TenantStatus::SUSPENDED => SubscriptionStatus::PAST_DUE,
-                        default => SubscriptionStatus::ACTIVE,
-                    },
+                    'status' => $subscriptionStatus,
                     'billing_interval' => $interval,
                     'price' => $amount,
                     'currency' => $currency,
@@ -482,6 +521,21 @@ class DemoSeeder extends Seeder
                     'trial_ends_at' => $status === TenantStatus::TRIAL ? now()->subHour() : null,
                     'grace_ends_at' => $status === TenantStatus::SUSPENDED ? now()->addDays(3) : null,
                     'metadata' => ['seeded' => true],
+                ],
+            );
+
+            SubscriptionHistory::query()->firstOrCreate(
+                [
+                    'subscription_id' => $subscription->id,
+                    'event' => 'created',
+                ],
+                [
+                    'from_status' => null,
+                    'to_status' => $subscriptionStatus,
+                    'from_plan_id' => null,
+                    'to_plan_id' => $plan->id,
+                    'user_id' => $admin->id,
+                    'meta' => ['seeded' => true],
                 ],
             );
 

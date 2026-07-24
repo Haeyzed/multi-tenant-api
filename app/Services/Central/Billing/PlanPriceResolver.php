@@ -6,6 +6,7 @@ namespace App\Services\Central\Billing;
 
 use App\Enums\Central\PlanStatus;
 use App\Enums\Central\SubscriptionInterval;
+use App\Models\Central\BillingProfile;
 use App\Models\Central\Plan;
 use App\Models\Central\PlanPrice;
 use App\Services\Central\Settings\SettingService;
@@ -19,12 +20,10 @@ use Illuminate\Validation\ValidationException;
 final class PlanPriceResolver
 {
     public function __construct(
-        private readonly WorldService    $world,
-        private readonly SettingService  $settings,
+        private readonly WorldService $world,
+        private readonly SettingService $settings,
         private readonly BillingSettings $billingSettings,
-    )
-    {
-    }
+    ) {}
 
     /**
      * Resolve an active price for a plan from country (preferred) or currency.
@@ -32,12 +31,12 @@ final class PlanPriceResolver
      * @throws ValidationException
      */
     public function resolve(
-        Plan                             $plan,
-        ?string                          $countryIso2 = null,
-        ?string                          $currency = null,
+        Plan $plan,
+        ?string $countryIso2 = null,
+        ?string $currency = null,
         SubscriptionInterval|string|null $interval = null,
-    ): PlanPrice
-    {
+        ?BillingProfile $billingProfile = null,
+    ): PlanPrice {
         if ($plan->status !== PlanStatus::Active) {
             throw ValidationException::withMessages([
                 'plan_id' => ['The selected plan is not active.'],
@@ -46,14 +45,16 @@ final class PlanPriceResolver
 
         $billingInterval = $interval instanceof SubscriptionInterval
             ? $interval
-            : (SubscriptionInterval::tryFrom((string)($interval ?? '')) ?? SubscriptionInterval::MONTHLY);
+            : (SubscriptionInterval::tryFrom((string) ($interval ?? '')) ?? SubscriptionInterval::MONTHLY);
 
-        $preferredCurrency = filled($currency)
-            ? Str::upper(trim((string)$currency))
-            : null;
+        $preferredCurrency = filled($billingProfile?->currency)
+            ? Str::upper((string) $billingProfile->currency)
+            : (filled($currency)
+            ? Str::upper(trim((string) $currency))
+            : null);
 
         if ($preferredCurrency === null && filled($countryIso2)) {
-            $preferredCurrency = $this->world->currencyForCountry((string)$countryIso2);
+            $preferredCurrency = $this->world->currencyForCountry((string) $countryIso2);
         }
 
         if (filled($preferredCurrency)) {
@@ -64,7 +65,7 @@ final class PlanPriceResolver
             }
         }
 
-        $fallbackCurrency = Str::upper((string)$this->settings->get(
+        $fallbackCurrency = Str::upper((string) $this->settings->get(
             'billing.default_currency',
             config('payments.currency', 'USD'),
         ));
@@ -117,17 +118,16 @@ final class PlanPriceResolver
     }
 
     private function findActivePrice(
-        Plan                  $plan,
-        string                $currency,
+        Plan $plan,
+        string $currency,
         ?SubscriptionInterval $interval,
-    ): ?PlanPrice
-    {
+    ): ?PlanPrice {
         return $plan->prices()
             ->where('status', PlanStatus::Active)
             ->where('currency', Str::upper($currency))
             ->when(
                 $interval !== null,
-                fn($query) => $query->where('billing_interval', $interval),
+                fn ($query) => $query->where('billing_interval', $interval),
             )
             ->orderBy('id')
             ->first();

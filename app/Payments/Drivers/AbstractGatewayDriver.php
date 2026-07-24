@@ -8,9 +8,11 @@ use App\Models\Central\Invoice;
 use App\Models\Central\Payment;
 use App\Models\Central\PaymentMethod;
 use App\Payments\Contracts\PaymentGatewayDriver;
+use App\Payments\DTOs\WebhookResult;
 use App\Payments\PaymentMethodPayload;
 use App\Payments\PaymentResult;
 use App\Payments\SetupSessionResult;
+use Illuminate\Http\Request;
 use Illuminate\Support\Str;
 
 /**
@@ -98,5 +100,43 @@ abstract class AbstractGatewayDriver implements PaymentGatewayDriver
         return PaymentResult::failure(
             "{$this->name()} does not support off-session charges.",
         );
+    }
+
+    /**
+     * @param  array<string, mixed>  $options
+     * @return array<string, mixed>
+     */
+    public function createCustomer(array $options = []): array
+    {
+        return ['id' => $this->reference('customer'), 'gateway' => $this->name()];
+    }
+
+    /**
+     * @param  array<string, mixed>  $options
+     * @return array<string, mixed>
+     */
+    public function createSubscription(array $options = []): array
+    {
+        return ['id' => $this->reference('subscription'), 'gateway' => $this->name()];
+    }
+
+    public function cancelSubscription(string $subscriptionId): void {}
+
+    public function resumeSubscription(string $subscriptionId): void {}
+
+    /**
+     * Ignore webhooks for gateways without a provider webhook implementation.
+     */
+    public function handleWebhook(Request $request): WebhookResult
+    {
+        return WebhookResult::ignored();
+    }
+
+    /**
+     * Report that payment verification is not available for this gateway.
+     */
+    public function verifyPayment(string $reference): PaymentResult
+    {
+        return PaymentResult::failure("{$this->name()} does not support payment verification.", $reference);
     }
 }

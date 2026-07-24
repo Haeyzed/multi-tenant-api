@@ -6,8 +6,8 @@ namespace App\Http\Controllers\Api\Central\Monitoring;
 
 use App\Http\Controllers\Controller;
 use App\Services\Central\Monitoring\MonitoringService;
-use Dedoc\Scramble\Attributes\Group;
 use Dedoc\Scramble\Attributes\Endpoint;
+use Dedoc\Scramble\Attributes\Group;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
 
@@ -21,7 +21,7 @@ final class MonitoringController extends Controller
     #[Endpoint(operationId: 'monitoring.overview', title: 'monitoring overview', description: 'Return an overview payload for monitorings.')]
     public function overview(Request $request): JsonResponse
     {
-        abort_unless($request->user()?->can('monitoring.view'), 403);
+        $this->authorize('viewMonitoring');
 
         return $this->success($this->monitoringService->overview(), 'Monitoring overview retrieved successfully.');
     }
@@ -29,7 +29,7 @@ final class MonitoringController extends Controller
     #[Endpoint(operationId: 'monitoring.queue', title: 'Queue status', description: 'Return queue depth and failed-job health.')]
     public function queue(Request $request): JsonResponse
     {
-        abort_unless($request->user()?->can('monitoring.view'), 403);
+        $this->authorize('viewMonitoring');
 
         return $this->success($this->monitoringService->queue(), 'Queue status retrieved successfully.');
     }
@@ -37,7 +37,7 @@ final class MonitoringController extends Controller
     #[Endpoint(operationId: 'monitoring.failedJobs', title: 'Failed jobs', description: 'Paginate failed queue jobs.')]
     public function failedJobs(Request $request): JsonResponse
     {
-        abort_unless($request->user()?->can('monitoring.view'), 403);
+        $this->authorize('viewMonitoring');
 
         $result = $this->monitoringService->failedJobs(
             (int) $request->integer('per_page', 25),
@@ -56,7 +56,7 @@ final class MonitoringController extends Controller
     #[Endpoint(operationId: 'monitoring.retryFailedJob', title: 'Retry failed job', description: 'Delete a failed job record to allow re-queue workflows.')]
     public function retryFailedJob(Request $request, int $failedJob): JsonResponse
     {
-        abort_unless($request->user()?->can('monitoring.manage'), 403);
+        $this->authorize('manageMonitoring');
 
         $ok = $this->monitoringService->retryFailedJob($failedJob);
 
@@ -68,7 +68,7 @@ final class MonitoringController extends Controller
     #[Endpoint(operationId: 'monitoring.flushFailedJobs', title: 'Flush failed jobs', description: 'Delete all failed job records.')]
     public function flushFailedJobs(Request $request): JsonResponse
     {
-        abort_unless($request->user()?->can('monitoring.manage'), 403);
+        $this->authorize('manageMonitoring');
 
         $deleted = $this->monitoringService->flushFailedJobs();
 
@@ -78,7 +78,7 @@ final class MonitoringController extends Controller
     #[Endpoint(operationId: 'monitoring.database', title: 'Database health', description: 'Probe database connectivity and latency.')]
     public function database(Request $request): JsonResponse
     {
-        abort_unless($request->user()?->can('monitoring.view'), 403);
+        $this->authorize('viewMonitoring');
 
         return $this->success($this->monitoringService->database(), 'Database health retrieved successfully.');
     }
@@ -86,7 +86,7 @@ final class MonitoringController extends Controller
     #[Endpoint(operationId: 'monitoring.storage', title: 'Storage health', description: 'Check storage path writability and disk space.')]
     public function storage(Request $request): JsonResponse
     {
-        abort_unless($request->user()?->can('monitoring.view'), 403);
+        $this->authorize('viewMonitoring');
 
         return $this->success($this->monitoringService->storage(), 'Storage health retrieved successfully.');
     }
@@ -94,7 +94,7 @@ final class MonitoringController extends Controller
     #[Endpoint(operationId: 'monitoring.redis', title: 'Redis health', description: 'Probe Redis when configured as cache/queue driver.')]
     public function redis(Request $request): JsonResponse
     {
-        abort_unless($request->user()?->can('monitoring.view'), 403);
+        $this->authorize('viewMonitoring');
 
         return $this->success($this->monitoringService->redis(), 'Redis health retrieved successfully.');
     }
@@ -102,9 +102,8 @@ final class MonitoringController extends Controller
     #[Endpoint(operationId: 'monitoring.server', title: 'Server info', description: 'Return PHP/Laravel runtime environment details.')]
     public function server(Request $request): JsonResponse
     {
-        abort_unless($request->user()?->can('monitoring.view'), 403);
+        $this->authorize('viewMonitoring');
 
         return $this->success($this->monitoringService->server(), 'Server health retrieved successfully.');
     }
 }
-

@@ -6,8 +6,8 @@ namespace App\Http\Controllers\Api\Central\Dashboard;
 
 use App\Http\Controllers\Controller;
 use App\Services\Central\Dashboard\DashboardService;
-use Dedoc\Scramble\Attributes\Group;
 use Dedoc\Scramble\Attributes\Endpoint;
+use Dedoc\Scramble\Attributes\Group;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
 
@@ -16,14 +16,12 @@ final class DashboardController extends Controller
 {
     public function __construct(
         private readonly DashboardService $dashboardService,
-    )
-    {
-    }
+    ) {}
 
     #[Endpoint(operationId: 'dashboard.overview', title: 'dashboard overview', description: 'Return an overview payload for dashboards.')]
     public function overview(Request $request): JsonResponse
     {
-        abort_unless($request->user()?->can('dashboard.view'), 403);
+        $this->authorize('viewDashboard');
 
         return $this->success(
             $this->dashboardService->overview(),
@@ -34,7 +32,7 @@ final class DashboardController extends Controller
     #[Endpoint(operationId: 'dashboard.statistics', title: 'dashboard statistics', description: 'Return aggregate statistics for dashboards.')]
     public function statistics(Request $request): JsonResponse
     {
-        abort_unless($request->user()?->can('dashboard.view'), 403);
+        $this->authorize('viewDashboard');
 
         return $this->success(
             $this->dashboardService->statistics(),
@@ -45,7 +43,7 @@ final class DashboardController extends Controller
     #[Endpoint(operationId: 'dashboard.revenue', title: 'Revenue metrics', description: 'Return MRR, ARR, and related revenue metrics.')]
     public function revenue(Request $request): JsonResponse
     {
-        abort_unless($request->user()?->can('dashboard.view'), 403);
+        $this->authorize('viewDashboard');
 
         return $this->success(
             $this->dashboardService->revenue(),
@@ -56,9 +54,9 @@ final class DashboardController extends Controller
     #[Endpoint(operationId: 'dashboard.growth', title: 'Growth metrics', description: 'Compare current vs previous period growth.')]
     public function growth(Request $request): JsonResponse
     {
-        abort_unless($request->user()?->can('dashboard.view'), 403);
+        $this->authorize('viewDashboard');
 
-        $days = (int)$request->integer('days', 30);
+        $days = (int) $request->integer('days', 30);
 
         return $this->success(
             $this->dashboardService->growth($days),
@@ -69,9 +67,9 @@ final class DashboardController extends Controller
     #[Endpoint(operationId: 'dashboard.charts', title: 'Charts data', description: 'Return time-series chart datasets.')]
     public function charts(Request $request): JsonResponse
     {
-        abort_unless($request->user()?->can('dashboard.view'), 403);
+        $this->authorize('viewDashboard');
 
-        $days = (int)$request->integer('days', 30);
+        $days = (int) $request->integer('days', 30);
 
         return $this->success(
             $this->dashboardService->charts($days),
@@ -82,9 +80,9 @@ final class DashboardController extends Controller
     #[Endpoint(operationId: 'dashboard.recentActivities', title: 'Recent activities', description: 'Return the latest platform activity entries.')]
     public function recentActivities(Request $request): JsonResponse
     {
-        abort_unless($request->user()?->can('dashboard.view'), 403);
+        $this->authorize('viewDashboard');
 
-        $limit = (int)$request->integer('limit', 15);
+        $limit = (int) $request->integer('limit', 15);
 
         return $this->success(
             $this->dashboardService->recentActivities($limit),
@@ -95,7 +93,7 @@ final class DashboardController extends Controller
     #[Endpoint(operationId: 'dashboard.notifications', title: 'Notification summary', description: 'Return unread/total notification counts for the user.')]
     public function notifications(Request $request): JsonResponse
     {
-        abort_unless($request->user()?->can('dashboard.view'), 403);
+        $this->authorize('viewDashboard');
 
         return $this->success(
             $this->dashboardService->notificationsSummary($request->user()),
@@ -106,7 +104,7 @@ final class DashboardController extends Controller
     #[Endpoint(operationId: 'dashboard.health', title: 'dashboard health', description: 'Return health status details.')]
     public function health(Request $request): JsonResponse
     {
-        abort_unless($request->user()?->can('dashboard.health'), 403);
+        $this->authorize('viewDashboardHealth');
 
         return $this->success(
             $this->dashboardService->platformHealth(),
@@ -114,4 +112,3 @@ final class DashboardController extends Controller
         );
     }
 }
-

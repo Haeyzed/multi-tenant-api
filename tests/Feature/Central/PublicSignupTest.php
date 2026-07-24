@@ -4,27 +4,33 @@ declare(strict_types=1);
 
 use App\Enums\Central\PlanStatus;
 use App\Enums\Central\PlanVisibility;
+use App\Enums\Central\SettingGroup;
+use App\Enums\Central\SettingType;
 use App\Enums\Central\SubscriptionStatus;
 use App\Enums\Central\TenantStatus;
+use App\Models\Central\BillingProfile;
 use App\Models\Central\Invoice;
 use App\Models\Central\Plan;
+use App\Models\Central\Setting;
 use App\Models\Central\Subscription;
+use App\Models\Central\SubscriptionHistory;
 use App\Models\Central\Tenant;
+use App\Services\Central\Settings\SettingService;
 
 beforeEach(function (): void {
     cleanupTenantDatabases();
 
-    \App\Models\Central\Setting::query()->updateOrCreate(
+    Setting::query()->updateOrCreate(
         ['key' => 'billing.signup_card_verification'],
         [
-            'group' => \App\Enums\Central\SettingGroup::Billing,
+            'group' => SettingGroup::Billing,
             'label' => 'Require Card Verification at Signup',
-            'type' => \App\Enums\Central\SettingType::BOOLEAN,
+            'type' => SettingType::BOOLEAN,
             'value' => '0',
             'default_value' => ['value' => false],
         ],
     );
-    app(\App\Services\Central\Settings\SettingService::class)->forgetCache();
+    app(SettingService::class)->forgetCache();
 });
 
 afterEach(function (): void {
@@ -97,7 +103,10 @@ it('signs up a tenant on trial with an active owner password and no invoice', fu
         ->and(Subscription::query()->find($subscriptionId)?->plan_price_id)->not->toBeNull()
         ->and(Invoice::query()->where('subscription_id', $subscriptionId)->exists())->toBeFalse()
         ->and(Tenant::query()->find($tenantId)?->metadata['signup_source'] ?? null)->toBe('self_serve')
-        ->and(Tenant::query()->find($tenantId)?->metadata['billing_country'] ?? null)->toBe('NG');
+        ->and(Tenant::query()->find($tenantId)?->metadata['billing_country'] ?? null)->toBe('NG')
+        ->and(BillingProfile::query()->where('tenant_id', $tenantId)->first()?->country_iso2)->toBe('NG')
+        ->and(BillingProfile::query()->where('tenant_id', $tenantId)->first()?->currency)->toBe('NGN')
+        ->and(SubscriptionHistory::query()->where('subscription_id', $subscriptionId)->where('event', 'created')->exists())->toBeTrue();
 
     tenantJson('selfserve.test', 'POST', '/api/v1/auth/login', [
         'email' => 'owner@selfserve.test',

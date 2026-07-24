@@ -7,9 +7,11 @@ namespace App\Payments\Contracts;
 use App\Models\Central\Invoice;
 use App\Models\Central\Payment;
 use App\Models\Central\PaymentMethod;
+use App\Payments\DTOs\WebhookResult;
 use App\Payments\PaymentMethodPayload;
 use App\Payments\PaymentResult;
 use App\Payments\SetupSessionResult;
+use Illuminate\Http\Request;
 
 /**
  * Contract implemented by every payment gateway driver.
@@ -73,4 +75,30 @@ interface PaymentGatewayDriver
      * @param  array<string, mixed>  $options
      */
     public function chargeOffSession(Invoice $invoice, Payment $payment, PaymentMethod $method, array $options = []): PaymentResult;
+
+    /**
+     * @param  array<string, mixed>  $options
+     * @return array<string, mixed>
+     */
+    public function createCustomer(array $options = []): array;
+
+    /**
+     * @param  array<string, mixed>  $options
+     * @return array<string, mixed>
+     */
+    public function createSubscription(array $options = []): array;
+
+    public function cancelSubscription(string $subscriptionId): void;
+
+    public function resumeSubscription(string $subscriptionId): void;
+
+    /**
+     * Verify and normalize an inbound provider webhook without mutating payments.
+     */
+    public function handleWebhook(Request $request): WebhookResult;
+
+    /**
+     * Verify the provider-side status for a payment reference.
+     */
+    public function verifyPayment(string $reference): PaymentResult;
 }

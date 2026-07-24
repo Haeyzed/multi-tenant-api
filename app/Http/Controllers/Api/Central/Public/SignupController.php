@@ -5,6 +5,8 @@ declare(strict_types=1);
 namespace App\Http\Controllers\Api\Central\Public;
 
 use App\Http\Controllers\Controller;
+use App\Http\Requests\Central\Public\CompletePublicSignupRequest;
+use App\Http\Requests\Central\Public\SignupPaymentOptionsRequest;
 use App\Http\Requests\Central\Public\StorePublicSignupRequest;
 use App\Http\Resources\Central\PlanResource;
 use App\Http\Resources\Central\PublicSignupResource;
@@ -75,13 +77,11 @@ final class SignupController extends Controller
         title: 'Signup payment options',
         description: 'Resolve currency from country and return configured gateways that support it.',
     )]
-    public function paymentOptions(Request $request): JsonResponse
+    public function paymentOptions(SignupPaymentOptionsRequest $request): JsonResponse
     {
-        $data = $request->validate([
-            'country' => ['required', 'string', 'size:2'],
-        ]);
+        $country = strtoupper(trim((string) $request->validated('country')));
 
-        $result = $this->signupIntentService->paymentOptions(strtoupper(trim((string) $data['country'])));
+        $result = $this->signupIntentService->paymentOptions($country);
 
         return $this->success($result, 'Signup payment options retrieved successfully.');
     }
@@ -109,16 +109,9 @@ final class SignupController extends Controller
         title: 'Complete signup after card verification',
         description: 'Confirm the provider setup session and create the tenant + trial subscription.',
     )]
-    public function complete(Request $request): JsonResponse
+    public function complete(CompletePublicSignupRequest $request): JsonResponse
     {
-        $data = $request->validate([
-            'signup_intent_id' => ['required', 'uuid', 'exists:signup_intents,id'],
-            'session_id' => ['sometimes', 'nullable', 'string', 'max:255'],
-            'trxref' => ['sometimes', 'nullable', 'string', 'max:255'],
-            'reference' => ['sometimes', 'nullable', 'string', 'max:255'],
-            'transaction_id' => ['sometimes', 'nullable', 'string', 'max:255'],
-            'id' => ['sometimes', 'nullable', 'string', 'max:255'],
-        ]);
+        $data = $request->validated();
 
         $result = $this->signupIntentService->complete(
             (string) $data['signup_intent_id'],

@@ -7,12 +7,15 @@ namespace App\Payments\Drivers;
 use App\Models\Central\Invoice;
 use App\Models\Central\Payment;
 use App\Models\Central\PaymentMethod;
+use App\Payments\DTOs\WebhookResult;
 use App\Payments\PaymentMethodPayload;
 use App\Payments\PaymentResult;
 use App\Payments\SetupSessionResult;
 use App\Payments\Support\InteractsWithPaymentHttp;
 use Illuminate\Http\Client\ConnectionException;
+use Illuminate\Http\Request;
 use Illuminate\Support\Str;
+use Symfony\Component\HttpKernel\Exception\AccessDeniedHttpException;
 use Throwable;
 
 /**
@@ -300,5 +303,94 @@ final class PaystackDriver extends AbstractGatewayDriver
             ...$options,
             'authorization_code' => $method->authorization_code,
         ]);
+    }
+
+    /**
+     * Verify a Paystack event and normalize the payment outcome without mutating it.
+     *
+     * @throws AccessDeniedHttpException
+     */
+    public function handleWebhook(Request $request): WebhookResult
+    {
+        $secret = (string) (config('payments.paystack.webhook_secret') ?: config('payments.paystack.secret'));
+        $signature = (string) $request->header('x-paystack-signature', '');
+
+        if ($secret !== '' && ! hash_equals(hash_hmac('sha512', $request->getContent(), $secret), $signature)) {
+            throw new AccessDeniedHttpException('Invalid Paystack webhook signature.');
+        }
+
+        /** @var array<string, mixed> $event */
+        $event = $request->json()->all();
+        $type = (string) ($event['event'] ?? '');
+        $data = is_array($event['data'] ?? null) ? $event['data'] : [];
+        $paymentId = $this->resolvePaymentId($data['metadata']['payment_id'] ?? null, (string) ($data['reference'] ?? ''));
+
+        if ($type === 'charge.success') {
+            $reference = (string) ($data['reference'] ?? $data['id'] ?? '');
+
+            if ($reference !== '') {
+                $verification = $this->verifyPaystackTransaction($reference);
+
+                if (! $verification->successful) {
+                    return $paymentId === null
+                        ? WebhookResult::ignored()
+                        : WebhookResult::failed($paymentId, $verification->message ?? 'Paystack transaction verification failed.', $event);
+                }
+            }
+
+            return $paymentId === null ? WebhookResult::ignored() : WebhookResult::completed($paymentId, $reference, $event);
+        }
+
+        if (in_array($type, ['charge.failed', 'paymentrequest.failed'], true)) {
+            return $paymentId === null
+                ? WebhookResult::ignored()
+                : WebhookResult::failed($paymentId, (string) ($data['gateway_response'] ?? 'Paystack charge failed.'), $event);
+        }
+
+        return WebhookResult::ignored();
+    }
+
+    /**
+     * Verify a Paystack transaction by reference.
+     */
+    public function verifyPayment(string $reference): PaymentResult
+    {
+        return $this->verifyPaystackTransaction($reference);
+    }
+
+    private function verifyPaystackTransaction(string $reference): PaymentResult
+    {
+        $secret = (string) config('payments.paystack.secret');
+
+        if ($secret === '') {
+            return PaymentResult::success($reference, 'completed');
+        }
+
+        $response = $this->httpClient((string) config('payments.paystack.api_base'))
+            ->withToken($secret)
+            ->get('/transaction/verify/'.$reference);
+
+        if ($response->failed() || $response->json('data.status') !== 'success') {
+            return PaymentResult::failure(
+                (string) ($response->json('message') ?? 'Paystack transaction verification failed.'),
+                $reference,
+                $response->json() ?? [],
+            );
+        }
+
+        return PaymentResult::success($reference, 'completed', $response->json() ?? []);
+    }
+
+    private function resolvePaymentId(mixed $paymentId, string $reference): ?int
+    {
+        if (filled($paymentId)) {
+            return Payment::query()->whereKey($paymentId)->value('id');
+        }
+
+        if ($reference !== '') {
+            return Payment::query()->where('gateway_reference', $reference)->value('id');
+        }
+
+        return null;
     }
 }

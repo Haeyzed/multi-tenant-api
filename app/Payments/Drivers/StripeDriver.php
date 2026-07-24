@@ -7,10 +7,13 @@ namespace App\Payments\Drivers;
 use App\Models\Central\Invoice;
 use App\Models\Central\Payment;
 use App\Models\Central\PaymentMethod;
+use App\Payments\DTOs\WebhookResult;
 use App\Payments\PaymentMethodPayload;
 use App\Payments\PaymentResult;
 use App\Payments\SetupSessionResult;
 use App\Payments\Support\InteractsWithPaymentHttp;
+use Illuminate\Http\Request;
+use Symfony\Component\HttpKernel\Exception\AccessDeniedHttpException;
 use Throwable;
 
 /**
@@ -324,5 +327,149 @@ final class StripeDriver extends AbstractGatewayDriver
             ...$options,
             'payment_method' => $method->external_id,
         ]);
+    }
+
+    /**
+     * Verify a Stripe event and normalize the payment outcome without mutating it.
+     *
+     * @throws AccessDeniedHttpException
+     */
+    public function handleWebhook(Request $request): WebhookResult
+    {
+        $payload = $request->getContent();
+        $signature = (string) $request->header('Stripe-Signature', '');
+        $secret = (string) config('payments.stripe.webhook_secret');
+
+        if ($secret !== '') {
+            $this->verifyStripeSignature($payload, $signature, $secret);
+        }
+
+        /** @var array<string, mixed> $event */
+        $event = $request->json()->all();
+        $type = (string) ($event['type'] ?? '');
+        $object = is_array($event['data']['object'] ?? null) ? $event['data']['object'] : [];
+
+        return match ($type) {
+            'checkout.session.completed' => $this->completedWebhook(
+                $object['metadata']['payment_id'] ?? $object['client_reference_id'] ?? null,
+                (string) ($object['payment_intent'] ?? $object['id'] ?? ''),
+                $event,
+            ),
+            'payment_intent.succeeded' => $this->completedWebhook(
+                $object['metadata']['payment_id'] ?? null,
+                (string) ($object['id'] ?? ''),
+                $event,
+            ),
+            'payment_intent.payment_failed' => $this->failedWebhook(
+                $object['metadata']['payment_id'] ?? null,
+                (string) ($object['last_payment_error']['message'] ?? 'Stripe payment failed.'),
+                $event,
+            ),
+            default => WebhookResult::ignored(),
+        };
+    }
+
+    /**
+     * Verify a Stripe PaymentIntent by reference.
+     */
+    public function verifyPayment(string $reference): PaymentResult
+    {
+        $secret = (string) config('payments.stripe.secret');
+
+        if ($secret === '') {
+            return PaymentResult::failure('Stripe is not configured. Set STRIPE_SECRET.', $reference);
+        }
+
+        $response = $this->httpClient((string) config('payments.stripe.api_base'))
+            ->withBasicAuth($secret, '')
+            ->get('/v1/payment_intents/'.$reference);
+
+        if ($response->failed()) {
+            return PaymentResult::failure(
+                (string) ($response->json('error.message') ?? 'Stripe payment verification failed.'),
+                $reference,
+                $response->json() ?? [],
+            );
+        }
+
+        $status = (string) $response->json('status');
+
+        return $status === 'succeeded'
+            ? PaymentResult::success($reference, 'completed', $response->json() ?? [])
+            : PaymentResult::failure('Stripe payment was not successful.', $reference, $response->json() ?? []);
+    }
+
+    /**
+     * @param  array<string, mixed>  $raw
+     */
+    private function completedWebhook(mixed $paymentId, string $reference, array $raw): WebhookResult
+    {
+        $paymentId = $this->resolvePaymentId($paymentId, $reference);
+
+        return $paymentId === null ? WebhookResult::ignored() : WebhookResult::completed($paymentId, $reference, $raw);
+    }
+
+    /**
+     * @param  array<string, mixed>  $raw
+     */
+    private function failedWebhook(mixed $paymentId, string $message, array $raw): WebhookResult
+    {
+        $paymentId = $this->resolvePaymentId($paymentId);
+
+        return $paymentId === null ? WebhookResult::ignored() : WebhookResult::failed($paymentId, $message, $raw);
+    }
+
+    private function resolvePaymentId(mixed $paymentId, ?string $reference = null): ?int
+    {
+        if (filled($paymentId)) {
+            return Payment::query()->whereKey($paymentId)->value('id');
+        }
+
+        if (filled($reference)) {
+            return Payment::query()->where('gateway_reference', $reference)->value('id');
+        }
+
+        return null;
+    }
+
+    /**
+     * @throws AccessDeniedHttpException
+     */
+    private function verifyStripeSignature(string $payload, string $header, string $secret): void
+    {
+        if ($header === '') {
+            throw new AccessDeniedHttpException('Missing Stripe signature.');
+        }
+
+        $parts = [];
+
+        foreach (explode(',', $header) as $item) {
+            [$key, $value] = array_pad(explode('=', $item, 2), 2, null);
+
+            if ($key !== null && $value !== null) {
+                $parts[$key][] = $value;
+            }
+        }
+
+        $timestamp = $parts['t'][0] ?? null;
+        $signatures = $parts['v1'] ?? [];
+
+        if ($timestamp === null || $signatures === []) {
+            throw new AccessDeniedHttpException('Malformed Stripe signature.');
+        }
+
+        if (abs(time() - (int) $timestamp) > 300) {
+            throw new AccessDeniedHttpException('Expired Stripe signature.');
+        }
+
+        $expected = hash_hmac('sha256', $timestamp.'.'.$payload, $secret);
+
+        foreach ($signatures as $signature) {
+            if (hash_equals($expected, $signature)) {
+                return;
+            }
+        }
+
+        throw new AccessDeniedHttpException('Invalid Stripe signature.');
     }
 }

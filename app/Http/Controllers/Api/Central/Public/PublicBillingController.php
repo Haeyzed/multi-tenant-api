@@ -5,6 +5,7 @@ declare(strict_types=1);
 namespace App\Http\Controllers\Api\Central\Public;
 
 use App\Http\Controllers\Controller;
+use App\Http\Requests\Central\Public\PayPublicInvoiceRequest;
 use App\Http\Resources\Central\PaymentResource;
 use App\Models\Central\Invoice;
 use App\Models\Central\Subscription;
@@ -75,15 +76,11 @@ final class PublicBillingController extends Controller
         title: 'Pay public invoice',
         description: 'Charge an invoice using a gateway that supports the invoice currency. Requires a valid signed show-link signature.',
     )]
-    public function payInvoice(Request $request, Invoice $invoice): JsonResponse
+    public function payInvoice(PayPublicInvoiceRequest $request, Invoice $invoice): JsonResponse
     {
         $this->publicInvoices->assertValidAccess($request, $invoice);
 
-        $data = $request->validate([
-            'gateway' => ['required', 'string', 'max:50'],
-        ]);
-
-        $result = $this->publicInvoices->pay($invoice, $data['gateway']);
+        $result = $this->publicInvoices->pay($invoice, $request->validated('gateway'));
 
         $message = $result['completed']
             ? 'Payment completed successfully.'

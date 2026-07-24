@@ -7,12 +7,15 @@ namespace App\Payments\Drivers;
 use App\Models\Central\Invoice;
 use App\Models\Central\Payment;
 use App\Models\Central\PaymentMethod;
+use App\Payments\DTOs\WebhookResult;
 use App\Payments\PaymentMethodPayload;
 use App\Payments\PaymentResult;
 use App\Payments\SetupSessionResult;
 use App\Payments\Support\InteractsWithPaymentHttp;
 use Illuminate\Http\Client\ConnectionException;
+use Illuminate\Http\Request;
 use Illuminate\Support\Str;
+use Symfony\Component\HttpKernel\Exception\AccessDeniedHttpException;
 use Throwable;
 
 /**
@@ -57,7 +60,8 @@ final class FlutterwaveDriver extends AbstractGatewayDriver
     /**
      * Refund via Flutterwave.
      *
-     * @param array<string, mixed> $options
+     * @param  array<string, mixed>  $options
+     *
      * @throws ConnectionException
      */
     public function refund(Payment $payment, float $amount, array $options = []): PaymentResult
@@ -135,7 +139,8 @@ final class FlutterwaveDriver extends AbstractGatewayDriver
     }
 
     /**
-     * @param array<string, mixed> $options
+     * @param  array<string, mixed>  $options
+     *
      * @throws ConnectionException
      */
     public function createSetupSession(array $options): SetupSessionResult
@@ -259,5 +264,93 @@ final class FlutterwaveDriver extends AbstractGatewayDriver
         return PaymentResult::failure(
             'Flutterwave off-session token charges are not enabled yet. Use hosted checkout.',
         );
+    }
+
+    /**
+     * Verify a Flutterwave event and normalize the payment outcome without mutating it.
+     *
+     * @throws AccessDeniedHttpException
+     */
+    public function handleWebhook(Request $request): WebhookResult
+    {
+        $secret = (string) config('payments.flutterwave.webhook_secret');
+        $signature = (string) $request->header('verif-hash', '');
+
+        if ($secret !== '' && ! hash_equals($secret, $signature)) {
+            throw new AccessDeniedHttpException('Invalid Flutterwave webhook signature.');
+        }
+
+        /** @var array<string, mixed> $event */
+        $event = $request->json()->all();
+        $data = is_array($event['data'] ?? null) ? $event['data'] : $event;
+        $status = Str::lower((string) ($data['status'] ?? $event['status'] ?? ''));
+        $reference = (string) ($data['tx_ref'] ?? $data['txRef'] ?? $data['id'] ?? '');
+        $paymentId = $this->resolvePaymentId($data['meta']['payment_id'] ?? $data['meta']['paymentId'] ?? null, $reference);
+
+        if (in_array($status, ['successful', 'success'], true)) {
+            $verification = $this->verifyFlutterwaveTransaction($reference);
+
+            if (! $verification->successful) {
+                return $paymentId === null
+                    ? WebhookResult::ignored()
+                    : WebhookResult::failed($paymentId, $verification->message ?? 'Flutterwave transaction verification failed.', $event);
+            }
+
+            return $paymentId === null ? WebhookResult::ignored() : WebhookResult::completed($paymentId, $reference, $event);
+        }
+
+        if (in_array($status, ['failed', 'cancelled'], true)) {
+            return $paymentId === null
+                ? WebhookResult::ignored()
+                : WebhookResult::failed($paymentId, 'Flutterwave payment '.$status.'.', $event);
+        }
+
+        return WebhookResult::ignored();
+    }
+
+    /**
+     * Verify a Flutterwave transaction by reference.
+     */
+    public function verifyPayment(string $reference): PaymentResult
+    {
+        return $this->verifyFlutterwaveTransaction($reference);
+    }
+
+    private function verifyFlutterwaveTransaction(string $reference): PaymentResult
+    {
+        $secret = (string) config('payments.flutterwave.secret');
+
+        if ($secret === '') {
+            return PaymentResult::success($reference, 'completed');
+        }
+
+        $response = $this->httpClient((string) config('payments.flutterwave.api_base'))
+            ->withToken($secret)
+            ->get('/transactions/verify_by_reference', ['tx_ref' => $reference]);
+
+        $status = $response->json('data.status');
+
+        if ($response->failed() || ! in_array($status, ['successful', 'success'], true)) {
+            return PaymentResult::failure(
+                (string) ($response->json('message') ?? 'Flutterwave transaction verification failed.'),
+                $reference,
+                $response->json() ?? [],
+            );
+        }
+
+        return PaymentResult::success($reference, 'completed', $response->json() ?? []);
+    }
+
+    private function resolvePaymentId(mixed $paymentId, string $reference): ?int
+    {
+        if (filled($paymentId)) {
+            return Payment::query()->whereKey($paymentId)->value('id');
+        }
+
+        if ($reference !== '') {
+            return Payment::query()->where('gateway_reference', $reference)->value('id');
+        }
+
+        return null;
     }
 }

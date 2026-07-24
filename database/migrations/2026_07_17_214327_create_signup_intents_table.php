@@ -20,6 +20,7 @@ return new class extends Migration
             $table->string('gateway_reference')->nullable()->index();
             $table->string('checkout_url')->nullable();
             $table->json('payload');
+            $table->text('password_secret')->nullable();
             $table->json('verification_meta')->nullable();
             $table->string('tenant_id')->nullable()->index();
             $table->timestamp('expires_at')->index();

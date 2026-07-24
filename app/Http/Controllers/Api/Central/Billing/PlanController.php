@@ -10,8 +10,10 @@ use App\Http\Requests\Central\Plans\BulkActivatePlansRequest;
 use App\Http\Requests\Central\Plans\BulkArchivePlansRequest;
 use App\Http\Requests\Central\Plans\BulkDeletePlansRequest;
 use App\Http\Requests\Central\Plans\RecordFeatureUsageRequest;
+use App\Http\Requests\Central\Plans\StorePlanPriceRequest;
 use App\Http\Requests\Central\Plans\StorePlanRequest;
 use App\Http\Requests\Central\Plans\SyncPlanFeaturesRequest;
+use App\Http\Requests\Central\Plans\UpdatePlanPriceRequest;
 use App\Http\Requests\Central\Plans\UpdatePlanRequest;
 use App\Http\Resources\Central\PlanFeatureResource;
 use App\Http\Resources\Central\PlanPriceResource;
@@ -22,8 +24,8 @@ use App\Models\Central\PlanPrice;
 use App\Models\Central\Tenant;
 use App\Services\Central\Billing\FeatureUsageService;
 use App\Services\Central\Billing\PlanService;
-use Dedoc\Scramble\Attributes\Group;
 use Dedoc\Scramble\Attributes\Endpoint;
+use Dedoc\Scramble\Attributes\Group;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
 
@@ -31,11 +33,9 @@ use Illuminate\Http\Request;
 final class PlanController extends Controller
 {
     public function __construct(
-        private readonly PlanService         $planService,
+        private readonly PlanService $planService,
         private readonly FeatureUsageService $featureUsageService,
-    )
-    {
-    }
+    ) {}
 
     #[Endpoint(operationId: 'billing.plan.index', title: 'List plans', description: 'Return a paginated list of plans.')]
     public function index(Request $request): JsonResponse
@@ -207,7 +207,7 @@ final class PlanController extends Controller
         $usage = $this->featureUsageService->record(
             $tenant,
             $feature,
-            (int)$request->integer('amount', 1),
+            (int) $request->integer('amount', 1),
             $plan
         );
 
@@ -234,37 +234,17 @@ final class PlanController extends Controller
     }
 
     #[Endpoint(operationId: 'billing.plan.prices.store', title: 'Create plan price', description: 'Add or upsert a currency price on a plan.')]
-    public function storePrice(Request $request, Plan $plan): JsonResponse
+    public function storePrice(StorePlanPriceRequest $request, Plan $plan): JsonResponse
     {
-        $this->authorize('update', $plan);
-
-        $data = $request->validate([
-            'amount' => ['required', 'numeric', 'min:0'],
-            'currency' => ['required', 'string', 'size:3'],
-            'billing_interval' => ['sometimes', 'string', 'in:monthly,quarterly,yearly'],
-            'trial_days' => ['sometimes', 'nullable', 'integer', 'min:0', 'max:365'],
-            'status' => ['sometimes', 'string', 'in:draft,active,inactive,archived'],
-            'metadata' => ['sometimes', 'nullable', 'array'],
-        ]);
-
-        $price = $this->planService->upsertPrice($plan, $data);
+        $price = $this->planService->upsertPrice($plan, $request->validated());
 
         return $this->success(new PlanPriceResource($price), 'Plan price saved successfully.', 201);
     }
 
     #[Endpoint(operationId: 'billing.plan.prices.update', title: 'Update plan price', description: 'Update an existing plan price.')]
-    public function updatePrice(Request $request, Plan $plan, PlanPrice $planPrice): JsonResponse
+    public function updatePrice(UpdatePlanPriceRequest $request, Plan $plan, PlanPrice $planPrice): JsonResponse
     {
-        $this->authorize('update', $plan);
-
-        $data = $request->validate([
-            'amount' => ['sometimes', 'numeric', 'min:0'],
-            'currency' => ['sometimes', 'string', 'size:3'],
-            'billing_interval' => ['sometimes', 'string', 'in:monthly,quarterly,yearly'],
-            'trial_days' => ['sometimes', 'nullable', 'integer', 'min:0', 'max:365'],
-            'status' => ['sometimes', 'string', 'in:draft,active,inactive,archived'],
-            'metadata' => ['sometimes', 'nullable', 'array'],
-        ]);
+        $data = $request->validated();
 
         $price = $this->planService->upsertPrice($plan, [
             'id' => $planPrice->id,
@@ -272,6 +252,9 @@ final class PlanController extends Controller
             'currency' => $data['currency'] ?? $planPrice->currency,
             'billing_interval' => $data['billing_interval'] ?? $planPrice->billing_interval?->value,
             'trial_days' => array_key_exists('trial_days', $data) ? $data['trial_days'] : $planPrice->trial_days,
+            'gateway_identifiers' => array_key_exists('gateway_identifiers', $data)
+                ? $data['gateway_identifiers']
+                : $planPrice->gateway_identifiers,
             'status' => $data['status'] ?? $planPrice->status?->value,
             'metadata' => $data['metadata'] ?? $planPrice->metadata,
         ]);
@@ -288,4 +271,3 @@ final class PlanController extends Controller
         return $this->success(null, 'Plan price deleted successfully.');
     }
 }
-

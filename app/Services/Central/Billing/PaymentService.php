@@ -10,6 +10,8 @@ use App\Enums\Central\PaymentGateway;
 use App\Enums\Central\PaymentStatus;
 use App\Enums\Central\SubscriptionStatus;
 use App\Enums\Central\TenantStatus;
+use App\Events\Central\Billing\PaymentCompleted;
+use App\Events\Central\Billing\PaymentFailed;
 use App\Models\Central\Invoice;
 use App\Models\Central\Payment;
 use App\Models\Central\PaymentMethod;
@@ -25,38 +27,35 @@ use Throwable;
 /**
  * Service responsible for processing payments and refunds against invoices.
  *
- * Delegates gateway interactions to configured drivers, records payment
- * attempts and audit logs, and updates invoice balances on successful charges.
- * Live checkout flows may leave a payment in processing until a webhook completes it.
+ * Gateway HTTP runs outside DB transactions. Short transactions create the
+ * processing payment, then record attempts and finalize success/failure.
  */
 final class PaymentService
 {
     public function __construct(
-        private readonly PaymentGatewayManager  $gateways,
-        private readonly SubscriptionService    $subscriptions,
+        private readonly PaymentGatewayManager $gateways,
+        private readonly SubscriptionService $subscriptions,
         private readonly PaymentGatewayResolver $gatewayResolver,
-    )
-    {
-    }
+    ) {}
 
     /**
      * Paginate payments with optional tenant, status, gateway, and search filters.
      *
-     * @param array{tenant_id?: string, status?: string, gateway?: string, search?: string, per_page?: int} $filters
+     * @param  array{tenant_id?: string, status?: string, gateway?: string, search?: string, per_page?: int}  $filters
      * @return LengthAwarePaginator<int, Payment>
      */
     public function paginate(array $filters = []): LengthAwarePaginator
     {
-        $perPage = min((int)($filters['per_page'] ?? 15), 100);
+        $perPage = min((int) ($filters['per_page'] ?? 15), 100);
 
         return Payment::query()
             ->with(['invoice', 'tenant', 'attempts', 'refunds'])
-            ->when($filters['tenant_id'] ?? null, fn($q, $id) => $q->where('tenant_id', $id))
-            ->when($filters['status'] ?? null, fn($q, $status) => $q->where('status', $status))
-            ->when($filters['gateway'] ?? null, fn($q, $gateway) => $q->where('gateway', $gateway))
+            ->when($filters['tenant_id'] ?? null, fn ($q, $id) => $q->where('tenant_id', $id))
+            ->when($filters['status'] ?? null, fn ($q, $status) => $q->where('status', $status))
+            ->when($filters['gateway'] ?? null, fn ($q, $gateway) => $q->where('gateway', $gateway))
             ->when(
                 $filters['search'] ?? null,
-                fn($query, string $search) => $query->where(function ($q) use ($search): void {
+                fn ($query, string $search) => $query->where(function ($q) use ($search): void {
                     $q->where('gateway_reference', 'like', "%{$search}%")
                         ->orWhere('currency', 'like', "%{$search}%")
                         ->orWhere('id', 'like', "%{$search}%")
@@ -93,24 +92,24 @@ final class PaymentService
             ->selectRaw('status, COUNT(*) as aggregate')
             ->groupBy('status')
             ->pluck('aggregate', 'status')
-            ->map(fn($count): int => (int)$count)
+            ->map(fn ($count): int => (int) $count)
             ->all();
 
         $byGateway = Payment::query()
             ->selectRaw('gateway, COUNT(*) as aggregate')
             ->groupBy('gateway')
             ->pluck('aggregate', 'gateway')
-            ->map(fn($count): int => (int)$count)
+            ->map(fn ($count): int => (int) $count)
             ->all();
 
         return [
-            'total' => (int)array_sum($byStatus),
-            'pending' => (int)($byStatus[PaymentStatus::PENDING->value] ?? 0),
-            'processing' => (int)($byStatus[PaymentStatus::PROCESSING->value] ?? 0),
-            'completed' => (int)($byStatus[PaymentStatus::COMPLETED->value] ?? 0),
-            'failed' => (int)($byStatus[PaymentStatus::FAILED->value] ?? 0),
-            'refunded' => (int)($byStatus[PaymentStatus::REFUNDED->value] ?? 0),
-            'volume' => (float)Payment::query()
+            'total' => (int) array_sum($byStatus),
+            'pending' => (int) ($byStatus[PaymentStatus::PENDING->value] ?? 0),
+            'processing' => (int) ($byStatus[PaymentStatus::PROCESSING->value] ?? 0),
+            'completed' => (int) ($byStatus[PaymentStatus::COMPLETED->value] ?? 0),
+            'failed' => (int) ($byStatus[PaymentStatus::FAILED->value] ?? 0),
+            'refunded' => (int) ($byStatus[PaymentStatus::REFUNDED->value] ?? 0),
+            'volume' => (float) Payment::query()
                 ->where('status', PaymentStatus::COMPLETED)
                 ->sum('amount'),
             'by_status' => $byStatus,
@@ -121,32 +120,28 @@ final class PaymentService
     /**
      * Charge an invoice through the configured payment gateway.
      *
-     * Creates a payment record, records the gateway attempt, updates the
-     * invoice balance on immediate success, or leaves the payment processing
-     * when the provider returns a hosted checkout URL.
-     *
-     * @param Invoice $invoice
-     * @param array{
+     * @param  array{
      *     gateway?: string,
      *     amount?: float|null,
      *     force_failure?: bool,
      *     payment_method?: string,
      *     authorization_code?: string
-     * } $options
-     * @return Payment
+     * }  $options
      *
      * @throws ValidationException|Throwable
      */
     public function chargeInvoice(Invoice $invoice, array $options = []): Payment
     {
-        return DB::transaction(function () use ($invoice, $options): Payment {
-            if (in_array($invoice->status, [InvoiceStatus::PAID, InvoiceStatus::VOID], true)) {
+        $amount = (float) ($options['amount'] ?? $invoice->balanceDue());
+
+        $payment = DB::transaction(function () use ($invoice, $options, $amount): Payment {
+            $lockedInvoice = Invoice::query()->lockForUpdate()->findOrFail($invoice->id);
+
+            if (in_array($lockedInvoice->status, [InvoiceStatus::PAID, InvoiceStatus::VOID], true)) {
                 throw ValidationException::withMessages([
                     'invoice' => ['This invoice cannot be charged.'],
                 ]);
             }
-
-            $amount = (float)($options['amount'] ?? $invoice->balanceDue());
 
             if ($amount <= 0) {
                 throw ValidationException::withMessages([
@@ -155,32 +150,59 @@ final class PaymentService
             }
 
             $gatewayValue = $this->gatewayResolver->resolve(
-                $invoice->currency,
-                isset($options['gateway']) ? (string)$options['gateway'] : null,
+                $lockedInvoice->currency,
+                isset($options['gateway']) ? (string) $options['gateway'] : null,
             );
             $gateway = PaymentGateway::from($gatewayValue);
-            $driver = $this->gateways->driver($gateway);
 
-            $payment = Payment::query()->create([
-                'tenant_id' => $invoice->tenant_id,
-                'invoice_id' => $invoice->id,
-                'subscription_id' => $invoice->subscription_id,
+            return Payment::query()->create([
+                'tenant_id' => $lockedInvoice->tenant_id,
+                'invoice_id' => $lockedInvoice->id,
+                'subscription_id' => $lockedInvoice->subscription_id,
                 'gateway' => $gateway,
                 'status' => PaymentStatus::PROCESSING,
                 'amount' => $amount,
-                'currency' => $invoice->currency,
+                'currency' => $lockedInvoice->currency,
             ]);
+        });
 
-            $attemptNumber = $payment->attempts()->count() + 1;
+        $driver = $this->gateways->driver($payment->gateway);
+        $storedMethod = $options['payment_method_model'] ?? null;
 
-            $storedMethod = $options['payment_method_model'] ?? null;
+        try {
             if ($storedMethod instanceof PaymentMethod) {
                 $result = $driver->chargeOffSession($invoice, $payment, $storedMethod, $options);
             } else {
                 $result = $driver->charge($invoice, $payment, $options);
             }
+        } catch (Throwable $exception) {
+            $this->recordChargeOutcome($payment, $invoice, $amount, PaymentResult::failure(
+                $exception->getMessage(),
+                raw: ['exception' => $exception::class],
+            ));
 
-            $payment->attempts()->create([
+            throw $exception;
+        }
+
+        return $this->recordChargeOutcome($payment, $invoice, $amount, $result);
+    }
+
+    /**
+     * Persist attempt/log and finalize charge result in a short transaction.
+     *
+     * @throws ValidationException|Throwable
+     */
+    private function recordChargeOutcome(
+        Payment $payment,
+        Invoice $invoice,
+        float $amount,
+        PaymentResult $result,
+    ): Payment {
+        return DB::transaction(function () use ($payment, $invoice, $amount, $result): Payment {
+            $lockedPayment = Payment::query()->lockForUpdate()->findOrFail($payment->id);
+            $attemptNumber = $lockedPayment->attempts()->count() + 1;
+
+            $lockedPayment->attempts()->create([
                 'attempt_number' => $attemptNumber,
                 'status' => $this->attemptStatusFromResult($result),
                 'gateway_reference' => $result->reference,
@@ -189,15 +211,15 @@ final class PaymentService
             ]);
 
             $this->log(
-                $payment,
+                $lockedPayment,
                 'charge_attempt',
                 $result->successful ? LogLevel::INFO : LogLevel::ERROR,
                 $result->message ?? 'Charge processed',
                 $result->raw,
             );
 
-            if (!$result->successful) {
-                $payment->update([
+            if (! $result->successful) {
+                $lockedPayment->update([
                     'status' => PaymentStatus::FAILED,
                     'failure_reason' => $result->message,
                     'gateway_reference' => $result->reference ?: null,
@@ -209,22 +231,24 @@ final class PaymentService
             }
 
             if ($result->isPending()) {
-                $payment->update([
+                $lockedPayment->update([
                     'status' => PaymentStatus::PROCESSING,
                     'gateway_reference' => $result->reference,
                     'failure_reason' => null,
                 ]);
 
-                return $payment->fresh(['attempts', 'invoice', 'logs']);
+                return $lockedPayment->fresh(['attempts', 'invoice', 'logs']);
             }
 
-            return $this->markPaymentCompleted($payment, $invoice, $amount, $result->reference);
+            $lockedInvoice = Invoice::query()->lockForUpdate()->findOrFail($invoice->id);
+
+            return $this->markPaymentCompleted($lockedPayment, $lockedInvoice, $amount, $result->reference);
         });
     }
 
     private function attemptStatusFromResult(PaymentResult $result): PaymentStatus
     {
-        if (!$result->successful) {
+        if (! $result->successful) {
             return PaymentStatus::FAILED;
         }
 
@@ -232,13 +256,7 @@ final class PaymentService
     }
 
     /**
-     * Persist a structured audit log entry for a payment event.
-     *
-     * @param Payment $payment
-     * @param string $event
-     * @param LogLevel $level
-     * @param string|null $message
-     * @param array<string, mixed> $context
+     * @param  array<string, mixed>  $context
      */
     private function log(Payment $payment, string $event, LogLevel $level, ?string $message, array $context = []): void
     {
@@ -262,8 +280,8 @@ final class PaymentService
         ]);
 
         $invoice->refresh();
-        $paid = (float)$invoice->amount_paid + $amount;
-        $fullyPaid = $paid >= (float)$invoice->total;
+        $paid = (float) $invoice->amount_paid + $amount;
+        $fullyPaid = $paid >= (float) $invoice->total;
         $invoice->update([
             'amount_paid' => $paid,
             'status' => $fullyPaid ? InvoiceStatus::PAID : $invoice->status,
@@ -277,9 +295,6 @@ final class PaymentService
         return $payment->fresh(['attempts', 'invoice', 'logs']);
     }
 
-    /**
-     * Activate trialing / past_due subscriptions once the conversion invoice is paid.
-     */
     private function activateSubscriptionAfterInvoicePaid(Invoice $invoice): void
     {
         $subscription = Subscription::query()->find($invoice->subscription_id);
@@ -288,7 +303,7 @@ final class PaymentService
             return;
         }
 
-        if (!in_array($subscription->status, [SubscriptionStatus::TRIALING, SubscriptionStatus::PAST_DUE], true)) {
+        if (! in_array($subscription->status, [SubscriptionStatus::TRIALING, SubscriptionStatus::PAST_DUE], true)) {
             return;
         }
 
@@ -301,25 +316,22 @@ final class PaymentService
     }
 
     /**
-     * Complete a previously initiated payment after provider confirmation.
-     *
-     * @param Payment $payment
-     * @param string $reference
-     * @param array<string, mixed> $raw
-     * @return Payment
+     * @param  array<string, mixed>  $raw
      *
      * @throws ValidationException|Throwable
      */
     public function completePayment(Payment $payment, string $reference, array $raw = []): Payment
     {
-        return DB::transaction(function () use ($payment, $reference, $raw): Payment {
+        $didComplete = false;
+
+        $completed = DB::transaction(function () use ($payment, $reference, $raw, &$didComplete): Payment {
             $payment = Payment::query()->lockForUpdate()->findOrFail($payment->id);
 
             if ($payment->status === PaymentStatus::COMPLETED) {
                 return $payment->fresh(['attempts', 'invoice', 'logs']);
             }
 
-            if (!in_array($payment->status, [PaymentStatus::PROCESSING, PaymentStatus::PENDING], true)) {
+            if (! in_array($payment->status, [PaymentStatus::PROCESSING, PaymentStatus::PENDING], true)) {
                 throw ValidationException::withMessages([
                     'payment' => ['Only processing payments can be completed.'],
                 ]);
@@ -329,67 +341,96 @@ final class PaymentService
 
             $this->log($payment, 'webhook_completed', LogLevel::INFO, 'Payment completed via provider webhook.', $raw);
 
-            return $this->markPaymentCompleted($payment, $invoice, (float)$payment->amount, $reference);
+            $completed = $this->markPaymentCompleted($payment, $invoice, (float) $payment->amount, $reference);
+            $didComplete = true;
+
+            return $completed;
         });
+
+        if ($didComplete) {
+            PaymentCompleted::dispatch($completed);
+        }
+
+        return $completed;
     }
 
     /**
-     * Mark a payment failed after provider rejection.
-     *
-     * @param Payment $payment
-     * @param string $message
-     * @param array<string, mixed> $raw
-     * @return Payment
+     * @param  array<string, mixed>  $raw
      */
     public function failPayment(Payment $payment, string $message, array $raw = []): Payment
     {
-        $payment->update([
-            'status' => PaymentStatus::FAILED,
-            'failure_reason' => $message,
-        ]);
+        $didFail = false;
 
-        $this->log($payment, 'webhook_failed', LogLevel::ERROR, $message, $raw);
+        $failed = DB::transaction(function () use ($payment, $message, $raw, &$didFail): Payment {
+            $lockedPayment = Payment::query()->lockForUpdate()->findOrFail($payment->id);
 
-        return $payment->fresh(['attempts', 'invoice', 'logs']);
+            if ($lockedPayment->status === PaymentStatus::FAILED) {
+                return $lockedPayment->fresh(['attempts', 'invoice', 'logs']);
+            }
+
+            if ($lockedPayment->status === PaymentStatus::COMPLETED) {
+                return $lockedPayment->fresh(['attempts', 'invoice', 'logs']);
+            }
+
+            $lockedPayment->update([
+                'status' => PaymentStatus::FAILED,
+                'failure_reason' => $message,
+            ]);
+
+            $this->log($lockedPayment, 'webhook_failed', LogLevel::ERROR, $message, $raw);
+            $didFail = true;
+
+            return $lockedPayment->fresh(['attempts', 'invoice', 'logs']);
+        });
+
+        if ($didFail) {
+            PaymentFailed::dispatch($failed, $message);
+        }
+
+        return $failed;
     }
 
     /**
-     * Refund a completed or partially refunded payment.
-     *
-     * Validates the refund amount, delegates to the original gateway driver,
-     * and updates the payment status based on cumulative refunded totals.
-     *
-     * @param Payment $payment
-     * @param array{amount?: float|null, reason?: string|null} $options
-     * @return Refund
+     * @param  array{amount?: float|null, reason?: string|null}  $options
      *
      * @throws ValidationException|Throwable
      */
     public function refund(Payment $payment, array $options = []): Refund
     {
-        return DB::transaction(function () use ($payment, $options): Refund {
-            if ($payment->status !== PaymentStatus::COMPLETED && $payment->status !== PaymentStatus::PARTIALLY_REFUNDED) {
+        $amount = (float) ($options['amount'] ?? ((float) $payment->amount - $payment->refundedAmount()));
+
+        DB::transaction(function () use ($payment, $amount): void {
+            $lockedPayment = Payment::query()->lockForUpdate()->findOrFail($payment->id);
+
+            if (
+                $lockedPayment->status !== PaymentStatus::COMPLETED
+                && $lockedPayment->status !== PaymentStatus::PARTIALLY_REFUNDED
+            ) {
                 throw ValidationException::withMessages([
                     'payment' => ['Only completed payments can be refunded.'],
                 ]);
             }
 
-            $amount = (float)($options['amount'] ?? ((float)$payment->amount - $payment->refundedAmount()));
+            $refundable = (float) $lockedPayment->amount - $lockedPayment->refundedAmount();
 
-            if ($amount <= 0 || $amount > ((float)$payment->amount - $payment->refundedAmount() + 0.00001)) {
+            if ($amount <= 0 || $amount > ($refundable + 0.00001)) {
                 throw ValidationException::withMessages([
                     'amount' => ['Invalid refund amount.'],
                 ]);
             }
+        });
 
-            $driver = $this->gateways->driver($payment->gateway);
-            $result = $driver->refund($payment, $amount, $options);
+        $driver = $this->gateways->driver($payment->gateway);
+        $result = $driver->refund($payment, $amount, $options);
+
+        return DB::transaction(function () use ($payment, $options, $amount, $result): Refund {
+            $lockedPayment = Payment::query()->lockForUpdate()->findOrFail($payment->id);
 
             $refund = Refund::query()->create([
-                'payment_id' => $payment->id,
-                'tenant_id' => $payment->tenant_id,
+                'payment_id' => $lockedPayment->id,
+                'tenant_id' => $lockedPayment->tenant_id,
                 'amount' => $amount,
-                'currency' => $payment->currency,
+                'currency' => $lockedPayment->currency,
                 'status' => $result->successful ? PaymentStatus::REFUNDED : PaymentStatus::FAILED,
                 'gateway_reference' => $result->reference ?: null,
                 'reason' => $options['reason'] ?? null,
@@ -397,17 +438,23 @@ final class PaymentService
                 'metadata' => $result->raw,
             ]);
 
-            $this->log($payment, 'refund_attempt', $result->successful ? LogLevel::INFO : LogLevel::ERROR, $result->message ?? 'Refund processed', $result->raw);
+            $this->log(
+                $lockedPayment,
+                'refund_attempt',
+                $result->successful ? LogLevel::INFO : LogLevel::ERROR,
+                $result->message ?? 'Refund processed',
+                $result->raw,
+            );
 
-            if (!$result->successful) {
+            if (! $result->successful) {
                 throw ValidationException::withMessages([
                     'refund' => [$result->message ?? 'Refund failed.'],
                 ]);
             }
 
-            $refunded = $payment->refundedAmount();
-            $payment->update([
-                'status' => $refunded >= (float)$payment->amount
+            $refunded = $lockedPayment->refundedAmount();
+            $lockedPayment->update([
+                'status' => $refunded >= (float) $lockedPayment->amount
                     ? PaymentStatus::REFUNDED
                     : PaymentStatus::PARTIALLY_REFUNDED,
             ]);

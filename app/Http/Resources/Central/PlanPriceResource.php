@@ -29,6 +29,7 @@ class PlanPriceResource extends JsonResource
             'status' => $this->status?->value,
             'status_label' => $this->status?->label(),
             'metadata' => $this->metadata ?? [],
+            'gateway_identifiers' => $this->gateway_identifiers ?? [],
             'created_at' => $this->created_at,
             'updated_at' => $this->updated_at,
         ];
